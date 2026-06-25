@@ -1,6 +1,9 @@
-# 00 — Architecture
+# Ilanga — Architecture (00)
 
 **Status:** Draft — in progress.
+
+## Project name
+**Ilanga** — from the Nguni (isiZulu/isiXhosa) word for *sun* / *day*. A residential solar monitoring system; the name names the thing the system is built around. Pronounced *ee-LAH-ngah*.
 
 ## Purpose & scope
 A residential solar monitoring system. It receives live inverter telemetry over TCP, stores it as immutable time-series facts, computes energy KPIs and billing metrics deterministically, and delivers interpreted analysis through an LLM interface.
