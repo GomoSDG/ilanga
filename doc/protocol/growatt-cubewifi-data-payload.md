@@ -1,6 +1,6 @@
 # Growatt CubeWiFi DATA Payload Reference
 
-All offsets, types, scales, and sign conventions in this document are confirmed against live pvbutler readings and the Sacolar/Growatt Modbus Protocol V1.2. This is the authoritative reference for the `growatt.protocol/decode-data` implementation and the ADR-018 hardware descriptor.
+All offsets, types, scales, and sign conventions in this document are confirmed against live pvbutler readings and the Sacolar/Growatt Modbus Protocol V1.2. This is the authoritative reference for the `growatt.protocol/decode-data` implementation and the ADR-018 hardware descriptor. Battery power (231) and battery current (241/243) are **handler-computed** from multiple registers with overflow handling (ADR-018) — not single-offset fields; see [Battery power & current decode](#battery-power--current-decode).
 
 ---
 
@@ -84,20 +84,51 @@ The server sends **UTC**. The inverter clock therefore runs in UTC; the `inverte
 | Total energy | 175 | uint32 BE | ÷10 | kWh | Confirmed vs pvbutler; 4 bytes; confirmed at 9283.1 kWh |
 | AC input current | 262 | uint16 BE | ÷100 | A | Confirmed ~3.36 A; Modbus `0x1002` ÷100 A |
 | Grid frequency | 267 | uint16 BE | ÷100 | Hz | ~49.99 Hz |
-| Battery power | 231 | **int16 BE (signed)** | ÷10 | W | Confirmed vs pvbutler `batPower`; **positive = discharging, negative = charging** |
-| Battery current | 241 | uint16 BE | ÷10 | A | Magnitude of total battery current; `V_bat × I_bat ≈ \|P_bat\|` |
+| Battery idle flag | 230 | uint8 | ×1 | flag | `0xFF` = no battery current flowing (idle); used by the power decode to force 0 W |
+| Battery power | 231 | int16 BE | ÷10 | W | Signed (**+ = discharging, − = charging**), but the **sign and overflow are resolved in the handler** from the direction registers 241/243, not bit 15 of 231. Handler-computed (ADR-018); see [Battery power & current decode](#battery-power--current-decode) |
+| Battery current (charge) | 241 | uint16 BE | ÷10 | A | Charge-direction magnitude only; net current = `discharge(243) − charge(241)` |
+| Battery current (discharge) | 243 | uint16 BE | ÷10 | A | Discharge-direction magnitude only; net current = `discharge(243) − charge(241)` |
 
 ### PV total power
 
 There is no `pv_total` field in the packet. Total PV power is computed as `pv1_power + pv2_power`. This matches pvbutler `panelPower`.
 
-### Battery power sign convention
+### Battery power & current decode
 
-`battery_power` at offset 231 is a **signed int16**:
-- **Positive** = battery discharging (supplying the load)
-- **Negative** = battery charging (absorbing PV or grid power)
+`battery_power` (offset 231) and `battery_current` are **handler-computed, not single-offset fields** (ADR-018). Offset 231 alone is ambiguous: its sign bit does not reliably indicate direction, and it **overflows** on large discharge. The handler resolves both from four registers:
 
-This matches pvbutler's `batPower` convention. The `battery_power_phys` field in the current implementation (`= -battery_power`) inverts this, producing a value that is negative when discharging — avoid using it for new KPIs; use `battery_power` directly with the sign convention above.
+| Register | Offset | Meaning |
+|---|---|---|
+| power magnitude | 231 | u16/s16 — ambiguous on overflow (see below) |
+| charge-direction current | 241 | u16, ÷10, A (magnitude, charge only) |
+| discharge-direction current | 243 | u16, ÷10, A (magnitude, discharge only) |
+| idle flag | 230 | u8 — `0xFF` = no current flowing |
+
+**Battery current** (signed, + = discharging): `I_bat = discharge(243) − charge(241)`, rounded to 0.01 A. The two registers are direction-specific magnitudes; their difference is the signed net current, and its sign matches `battery_power`.
+
+**Battery power** (signed, + = discharging): resolved by direction, with a **0.5 A hysteresis** to avoid misclassifying idle noise — charge-current (241) reads ~0 at idle, so a bare `charge == 0` test would fabricate a large "discharge" from idle noise:
+
+```mermaid
+flowchart TD
+    R["Read 231 (power mag), 241 (charge I), 243 (discharge I), 230 (idle flag)"] --> C
+    C{"charge-I &gt; 0.5 A<br/>and discharge-I &lt; 0.5 A?"}
+    C -- "yes → charging" --> N["power = negative<br/>if raw-231 ≥ 0x8000: signed-231 ÷10<br/>else: (−raw-231) ÷10"]
+    C -- "no" --> D{"discharge-I &gt; 0.5 A<br/>and charge-I &lt; 0.5 A?"}
+    D -- "yes → discharging" --> P["power = positive<br/>raw-231 ÷10 — read UNSIGNED:<br/>survives discharge &gt; 3276.7 W<br/>wrapping 231 into 0x8000+"]
+    D -- "no → idle" --> I{"byte 230 == 0xFF?"}
+    I -- "yes" --> Z["power = 0.0"]
+    I -- "no" --> F["power = signed-231 ÷10"]
+    N --> O(("battery_power W<br/>(+ = discharging)"))
+    P --> O
+    Z --> O
+    F --> O
+```
+
+The overflow case is why 231 cannot be a plain signed int16: a discharge above 3276.7 W sets bit 15 of 231, which a signed read interprets as a large **negative** number. Reading 231 **unsigned** while the direction registers say "discharging" yields the correct positive power. Conversely, when the inverter reports charge as a positive magnitude (raw-231 `< 0x8000` during charge), the handler negates it.
+
+This matches pvbutler's `batPower` convention (positive = discharging). The legacy `battery_power_phys` field (`= −battery_power`) inverts this — avoid it for new KPIs; use `battery_power` directly.
+
+> Both fields are handler-computed (ADR-018). They are **not** expressible as `{:offset :type :scale}` descriptor entries; the hardware descriptor references a compute fn in `ilanga.protocol.codec` for them (ADR-018/030).
 
 ---
 
