@@ -103,7 +103,7 @@ Growatt CubeWiFi (outbound TCP)
         → hardware mapping dispatch (by :hardware/id on connection)
         → generic decoder (offsets + types from descriptor → values)
         → Malli validation of canonical Reading
-        → write via solar.readings/write! (TenantStore — ADR-026)
+        → write via ilanga.domain.readings/write! (TenantStore — ADR-026)
         → put! onto core.async channel
     → pipeline consumer (ADR-007)
         → emit :new-reading signal

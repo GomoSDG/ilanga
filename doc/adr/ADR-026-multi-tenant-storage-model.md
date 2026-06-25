@@ -35,17 +35,17 @@ Two things, both cheap now and expensive to retrofit (retrofit = rewrite):
 (def store (open-store {:tenant-id "home"}))
 
 ;; Domain namespaces define their own query vocabulary; queries filter site_id, never tenant_id
-(solar.readings/latest       store site-id)
-(solar.readings/in-range      store site-id from to)
-(solar.readings/write!        store reading)     ;; reading carries :reading/site-id, :reading/device-serial
+(ilanga.domain.readings/latest   store site-id)
+(ilanga.domain.readings/in-range store site-id from to)
+(ilanga.domain.readings/write!   store reading)   ;; reading carries :reading/site-id, :reading/device-serial
 
-(solar.days/by-date           store site-id date)
-(solar.days/finalize!         store day)
+(ilanga.domain.days/by-date   store site-id date)
+(ilanga.domain.days/finalize! store day)
 
-(solar.incidents/active       store site-id)
-(solar.incidents/close!       store id)
+(ilanga.domain.incidents/active store site-id)
+(ilanga.domain.incidents/close!  store id)
 
-(solar.tariffs/active         store site-id)
+(ilanga.domain.tariffs/active store site-id)
 ```
 
 `open-store` is the only construction point for a tenant-scoped store. Global config (device registry, hardware descriptors, permission descriptors) is not scoped to a tenant and is accessed separately — not through `TenantStore`. This is a real ordering constraint, not a stylistic split: the device registry (global) is read *without* a store to obtain `tenant-id` and `site-id`, which are then passed to `open-store` (tenant-id) and to query functions (site-id). Global config is the root, reachable before any store exists — which is exactly why it cannot itself be behind a `TenantStore`.
@@ -128,7 +128,7 @@ ADR-011's stored day/month/year Periods + the two-phase `:recompute` could be ba
 
 ## Open / deferred
 - **`open-store` config shape and construction** — the exact arguments, client initialisation, and connection pooling strategy are defined in TDD-02 (Persistence, entity model & tenancy).
-- **Domain namespace vocabularies** — the query and write functions for each domain (`solar.readings`, `solar.days`, `solar.incidents`, etc.) are defined by the ADR and TDD governing that domain; not by this ADR.
+- **Domain namespace vocabularies** — the query and write functions for each domain (`ilanga.domain.readings`, `ilanga.domain.days`, `ilanga.domain.incidents`, etc.) are defined by the ADR and TDD governing that domain; not by this ADR.
 - **`tenant_id` structural isolation** — deferred to cloud (shared-schema only) as the row-level key; materialized at export from the file identity, transparent to domain code. Locally the file boundary (file-per-tenant) or the single-tenant invariant (single-file) isolates — no column needed.
 - **File-per-tenant sharding** — deferred until a second tenant arrives; contained inside `open-store`, no caller changes required.
 - **Cloud row-level-isolation mechanism detail** (policy syntax, hypertable space-partitioning, bulk loading, compression) — owned by ADR-008's cloud-migration addendum.

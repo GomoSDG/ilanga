@@ -44,7 +44,7 @@ A `TenantStore` is a **binding record, not an interface** (ADR-026): it carries 
 
 The asymmetry is intentional: **tenant scoping is structural** (file boundary / single-tenant invariant / RLS) — never a query-rewrite, because a query-rewrite is bypassable. A single DuckDB file holding multiple *tenants* is *not* a supported mode (DuckDB has no native row-level isolation — ADR-008); a single file holding multiple *sites of one tenant* **is** supported, via the `site_id` column. **Config scoping is by section key** — a code-enforced boundary, accepted because config is read-mostly and low leak-risk (ADR-026).
 
-**The config client is a scoped wrapper.** SQLite holds all tenants' config in one file, so `open-store` returns a thin wrapper (not the raw datasource) that knows `tenant-id` and prefixes section keys. Domain config namespaces call it with a *logical* section name (`solar.tariffs/active` reads `:tariffs`); the wrapper maps `:tariffs` → `"tariffs/home"`. Domain code never sees or types `tenant-id`. *(Proposed mechanism — ADR-026 mandates "client encapsulates scoping"; the wrapper is how TDD-02 satisfies it for SQLite. Redirectable.)*
+**The config client is a scoped wrapper.** SQLite holds all tenants' config in one file, so `open-store` returns a thin wrapper (not the raw datasource) that knows `tenant-id` and prefixes section keys. Domain config namespaces call it with a *logical* section name (`ilanga.domain.tariffs/active` reads `:tariffs`); the wrapper maps `:tariffs` → `"tariffs/home"`. Domain code never sees or types `tenant-id`. *(Proposed mechanism — ADR-026 mandates "client encapsulates scoping"; the wrapper is how TDD-02 satisfies it for SQLite. Redirectable.)*
 
 **`tenant-id` is on the record for internal use only** — the config wrapper, the cloud session var, and export stamping read it; domain code does not. The structural tenant scoping means domain code has no *need* to filter on it (it filters `site_id` instead); the config wrapper means it has no *need* to scope with it. Not reading it is a discipline, backed by structure where structure is available.
 
@@ -53,7 +53,7 @@ The asymmetry is intentional: **tenant scoping is structural** (file boundary / 
 **Datasources** — both via `next.jdbc` (same library, different JDBC drivers, ADR-008): DuckDB `{:dbtype "duckdb" :dbname "data/solar.ddb"}`, SQLite `{:dbtype "sqlite" :dbname "data/config.db"}`.
 
 ### Domain query vocabulary
-TODO (next sub-step): the `solar.readings/*` read/write functions — `latest store site-id`, `in-range store site-id from to`, `write! store reading` — the read API the dashboard (TDD-08) calls. Queries take `site-id` explicitly; `tenant_id` is never an argument. Per-domain vocabularies for the other entities are defined alongside TDD-03.
+TODO (next sub-step): the `ilanga.domain.readings/*` read/write functions — `latest store site-id`, `in-range store site-id from to`, `write! store reading` — the read API the dashboard (TDD-08) calls. Queries take `site-id` explicitly; `tenant_id` is never an argument. Per-domain vocabularies for the other entities are defined alongside TDD-03.
 
 ### Config split (global vs per-tenant)
 - **Global** (no `tenant_id`, read without a store): device registry, permission descriptors, prompt templates, hardware descriptors.
