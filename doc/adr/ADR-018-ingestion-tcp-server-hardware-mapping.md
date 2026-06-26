@@ -46,32 +46,33 @@ The descriptor covers **field extraction only**: byte offsets, value types, and 
 
 The generic decoder reads offsets, types, and scale factors from the descriptor and extracts field values. Note: there is no single `pv_total` field in the packet — total PV power is computed as `pv1 + pv2`.
 
-```clojure
-;; Code registry (deploy-time)
-(def hardware
-  {:growatt-cubewifi #'solar.engine.ingest.growatt/decode-reading})
+The descriptor's **shape** (what this decision fixes) — a pure-data map of framing, serial, timestamp, and a `:fields` list where each field is `{:reading-key :offset :type :scale}`:
 
-;; Hardware descriptor (code-side, pure data, deploy-time)
-;; Offsets and types from doc/protocol/growatt-cubewifi-data-payload.md
-{:hardware/id       "growatt-cubewifi"
- :hardware/protocol :growatt-data-v1
- :hardware/mappings
- {:reading/pv1-power-w      [:offset 79  :type :uint16 :scale 0.1]
-  :reading/pv2-power-w      [:offset 83  :type :uint16 :scale 0.1]
-  :reading/load-power-w     [:offset 91  :type :uint16 :scale 0.1]
-  :reading/grid-power-w     [:offset 145 :type :uint16 :scale 0.1]   ;; unsigned: grid import only, never negative (no export, ADR-021)
-  :reading/battery-power-w  [:offset 231 :type :int16  :scale 0.1]   ;; magnitude only — sign resolved by the protocol handler, see below
-  :reading/energy-today-kwh [:offset 174 :type :uint8  :scale 0.1]   ;; single byte; max 25.5 kWh — pending re-verification on high-yield summer capture (see protocol doc)
-  :reading/energy-total-kwh [:offset 175 :type :uint32 :scale 0.1]
-  :reading/temp-c           [:offset 121 :type :uint16 :scale 0.1]}}
-;; Computed in the Growatt protocol handler (NOT single-offset mappings — see protocol doc "Battery power decode"):
-;;   :reading/battery-current-a — signed net current = discharge_current(243) − charge_current(241)
-;;   :reading/battery-power-w sign — taken from the direction-specific current registers, not bit 15 of 231
-;; Dropped: :reading/battery-soc-pct at offset 107 — disproven; offset 107/108 is broken BMS noise, not a state-of-charge.
-;;   battery-voltage (offset 105) is the only usable charge proxy. (See register-map note, 2026-06-24.)
+```clojure
+;; Illustrative shape only — NOT authoritative content.
+;; Authoritative offsets/types/scales live in the protocol doc and the actual descriptor file:
+;;   doc/protocol/growatt-cubewifi-data-payload.md   (byte-level reference, evolves with understanding)
+;;   resources/hardware/<model>.edn                 (the real descriptor data, evolves per model)
+{:hardware-id :growatt/<model>
+ :payload-len 349
+ :framing    {:proto-xor 0x0006 :xor-key "Growatt"
+              :crc {:algorithm :crc16-modbus :poly 0xA001 :init 0xFFFF
+                    :input-order :big-endian :covers :header+encrypted-payload}}
+ :serial     {:offset 0 :len 10 :encoding :ascii}
+ :timestamp  {:offset 60 :fields [...]}
+ :fields     [{:reading-key :reading/<key> :offset <n> :type :uint16-be :scale 0.1}
+              ...]}
 ```
 
-New inverter model (same protocol) = new descriptor = deploy. No new parsing logic.
+The descriptor carries three field **classes**, distinguished by how the value enters the Reading:
+
+- **`:fields`** — single-offset extract: one byte range, one type, one scale; the generic decoder extracts directly (e.g. pv1-power-w, energy-total-kwh, temp-c).
+- **`:compute`** — multi-register, from the payload, with logic the `{:offset :type :scale}` triple cannot express (battery power/current: signed net, direction-dependent, overflow-sensitive). Not single-offset entries; a per-protocol codec fn computes them. The full decode lives in the protocol doc's "Battery power & current decode".
+- **`:derive`** — declarative ops over *already-decoded* Reading fields, no payload (e.g. pv-total = pv1 + pv2). Canonical but not measured; computed at ingest and stored.
+
+Decode order is `:fields` → `:compute` → `:derive` → write. How `:compute` and `:derive` are represented in the descriptor (offsets-in-descriptor + multimethod dispatch for `:compute`; declarative ops, stored at ingest, for `:derive`) is decided in **[ADR-033](ADR-033-computed-derived-field-representation.md)**; this ADR fixes only the *fact* of the three classes and that computed fields are not single-offset `:fields` entries.
+
+New inverter model (same protocol) = new descriptor file = deploy. No new parsing logic. New protocol = new code.
 
 **Hardware mapping descriptors are developer-authored only.** Byte offsets, type widths, and scale factors require protocol-level knowledge and binary verification — not appropriate for LLM authorship. There is no LLM-facing catalog entry for hardware descriptors. This is an explicit exception to the general pattern where the LLM discovers available registry entries via catalog.
 

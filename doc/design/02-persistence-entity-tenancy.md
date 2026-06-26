@@ -9,6 +9,7 @@ How facts are stored and partitioned: the eleven domain entities, the in-process
 - ADR-002 Domain entity model (11 entities) — Accepted
 - ADR-008 DuckDB + SQLite initial persistence — Accepted
 - ADR-026 Multi-tenant storage model — Accepted
+- ADR-033 Computed & derived field representation in hardware descriptors — Accepted
 
 ## Interfaces
 
@@ -83,6 +84,7 @@ CREATE TABLE readings (
   -- measurement vocabulary (canonical field names, ADR-019); absent on a device = NULL
   pv1_voltage_v        DOUBLE,  pv2_voltage_v        DOUBLE,
   pv1_power_w          DOUBLE,  pv2_power_w          DOUBLE,
+  pv_total_power_w     DOUBLE,  -- derived: pv1+pv2, stored at ingest (ADR-033); not a measured fact
   pv1_current_a        DOUBLE,  pv2_current_a        DOUBLE,
   load_power_w         DOUBLE,
   ac_apparent_power_va DOUBLE,
@@ -101,6 +103,7 @@ CREATE TABLE readings (
 - No `tenant_id` column (ADR-026): locally the file boundary isolates; `tenant_id` is stamped at export. `site_id` is the domain-filtered column.
 - Identity = `(device_serial, ts)` (ADR-002) → `PRIMARY KEY`, and the `ON CONFLICT` target for idempotent `write!`. `seq` is stored but deliberately **not** part of identity — see the noted assumption below.
 - Measurement columns are nullable: a field a device's hardware descriptor does not produce is `NULL`, surfaced as `:kpi/available? false` (ADR-010). Adding a canonical measurement = entity-schema change + DDL migration (rare; protocol changes already require a deploy, ADR-018).
+- **Derived columns** (ADR-033): `pv_total_power_w` is a *stored derived* field, not a measured fact — written by the descriptor's `:derive` step at ingest (`pv1+pv2`). `NULL` only when the device lacks pv1/pv2; present on any two-string device. A documented divergence from "only physical facts are stored," accepted for read simplicity (ADR-033).
 - Index: DuckDB zone-maps over append-sorted `ts` suffice for `in-range` at single-home volume; an explicit index on `(site_id, device_serial, ts)` is noted but deferred until volume warrants it.
 
 **Identity assumption — noted (open decision, collected in [ADR-032](../adr/ADR-032-reading-identity.md)).** `(device_serial, ts)` assumes no two *distinct* readings from one device share a timestamp. Growatt timestamps can be coarse (back-to-back packets may share a `ts`, differing in `seq`), so under `ON CONFLICT (device_serial, ts) DO NOTHING` a genuinely-distinct same-`ts` reading is silently dropped — *treated as a replay*, a loss of the second snapshot. `seq` is intentionally excluded because it is a Growatt/protocol artifact not guaranteed across inverters. This is an unresolved conflict with real failure modes on both sides; the full options, tradeoffs, analysis-needed, and triggers to decide are collected in ADR-032 (Draft). Until then the assumption holds for the single Growatt site; resolving it is a deliberate, versioned change (new/flipped ADR), not a silent edit.
@@ -171,7 +174,8 @@ The domain representation of one inverter snapshot — append-only, immutable (A
 | `:reading/energy-today-kwh` | number | kWh | energy generated today |
 | `:reading/energy-total-kwh` | number | kWh | lifetime energy generated |
 
-**Not stored on `Reading` — derived at compute time (TDD-03):** pv-total power (`pv1+pv2`), self-consumption, self-sufficiency. `Reading` is the raw fact; derivations are KPIs.
+**Stored on `Reading`, derived at ingest (ADR-033):** pv-total power (`pv1+pv2`) — a canonical field computed from `pv1`+`pv2` by the descriptor's `:derive` step and written as a column (`pv_total_power_w`). It is *not* a measured fact, but is stored for plain column reads (no recompute-on-read, no write/read rule-drift). `:derive` is declarative ops only; an fn escape-hatch is deferred until a real derived field needs one (ADR-033).
+**Not stored on `Reading` — KPIs, computed downstream (TDD-03):** self-consumption, self-sufficiency. These aggregate over time / need a Day context, not a single Reading; they are the engine's job, not ingestion's.
 **Not stored on `Reading` — encapsulation (ADR-026):** `tenant_id`. The store scopes the tenant; domain code never sees it. (`site_id` *is* on the row — the site, domain-filtered; it is not an isolation key.)
 **Not stored on `Reading` — protocol concerns (ADR-018 / protocol doc):** byte offsets, field widths, and decode logic (e.g. how a device derives signed battery power/current from its registers). These belong to the hardware mapping, on the other side of the domain boundary.
 
