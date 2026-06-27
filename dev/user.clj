@@ -16,5 +16,6 @@
 
 (comment
   (open!)
-  (readings/latest store "home")
+  ;; :readings holds the Readings port impl; call the protocol fns on it.
+  (readings/latest (:readings store) "home")
   )
