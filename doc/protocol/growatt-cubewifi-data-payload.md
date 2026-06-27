@@ -1,6 +1,6 @@
 # Growatt CubeWiFi DATA Payload Reference
 
-All offsets, types, scales, and sign conventions in this document are confirmed against live pvbutler readings and the Sacolar/Growatt Modbus Protocol V1.2. This is the authoritative reference for the `growatt.protocol/decode-data` implementation and the ADR-018 hardware descriptor. Battery power (231) and battery current (241/243) are **handler-computed** from multiple registers with overflow handling (ADR-018) — not single-offset fields; see [Battery power & current decode](#battery-power--current-decode).
+All offsets, types, scales, and sign conventions in this document are confirmed against live pvbutler readings and the Sacolar/Growatt Modbus Protocol V1.2. This is the authoritative reference for the `ilanga.protocol.decoder` implementation and the ADR-018 hardware descriptor. Battery power (231) and battery current (241/243) are **codec-computed** from multiple registers with overflow handling via the descriptor's `:compute` class (ADR-033) — not single-offset fields; see [Battery power & current decode](#battery-power--current-decode).
 
 ---
 
@@ -85,7 +85,7 @@ The server sends **UTC**. The inverter clock therefore runs in UTC; the `inverte
 | AC input current | 262 | uint16 BE | ÷100 | A | Confirmed ~3.36 A; Modbus `0x1002` ÷100 A |
 | Grid frequency | 267 | uint16 BE | ÷100 | Hz | ~49.99 Hz |
 | Battery idle flag | 230 | uint8 | ×1 | flag | `0xFF` = no battery current flowing (idle); used by the power decode to force 0 W |
-| Battery power | 231 | int16 BE | ÷10 | W | Signed (**+ = discharging, − = charging**), but the **sign and overflow are resolved in the handler** from the direction registers 241/243, not bit 15 of 231. Handler-computed (ADR-018); see [Battery power & current decode](#battery-power--current-decode) |
+| Battery power | 231 | int16 BE | ÷10 | W | Signed (**+ = discharging, − = charging**), but the **sign and overflow are resolved by the codec fn** from the direction registers 241/243, not bit 15 of 231. Codec-computed (`:compute`, ADR-033); see [Battery power & current decode](#battery-power--current-decode) |
 | Battery current (charge) | 241 | uint16 BE | ÷10 | A | Charge-direction magnitude only; net current = `discharge(243) − charge(241)` |
 | Battery current (discharge) | 243 | uint16 BE | ÷10 | A | Discharge-direction magnitude only; net current = `discharge(243) − charge(241)` |
 
@@ -95,7 +95,7 @@ There is no `pv_total` field in the packet. Total PV power is computed as `pv1_p
 
 ### Battery power & current decode
 
-`battery_power` (offset 231) and `battery_current` are **handler-computed, not single-offset fields** (ADR-018). Offset 231 alone is ambiguous: its sign bit does not reliably indicate direction, and it **overflows** on large discharge. The handler resolves both from four registers:
+`battery_power` (offset 231) and `battery_current` are **codec-computed, not single-offset fields** (ADR-033). Offset 231 alone is ambiguous: its sign bit does not reliably indicate direction, and it **overflows** on large discharge. The codec fn resolves both from four registers:
 
 | Register | Offset | Meaning |
 |---|---|---|
@@ -128,7 +128,7 @@ The overflow case is why 231 cannot be a plain signed int16: a discharge above 3
 
 This matches pvbutler's `batPower` convention (positive = discharging). The legacy `battery_power_phys` field (`= −battery_power`) inverts this — avoid it for new KPIs; use `battery_power` directly.
 
-> Both fields are handler-computed (ADR-018). They are **not** expressible as `{:offset :type :scale}` descriptor entries; the hardware descriptor references a compute fn in `ilanga.protocol.codec` for them (ADR-018/030).
+> Both fields are codec-computed (ADR-033). They are **not** expressible as `{:offset :type :scale}` descriptor entries; the hardware descriptor references a codec fn via `:compute` in `ilanga.protocol.growatt.codec` for them (ADR-018/033).
 
 ---
 

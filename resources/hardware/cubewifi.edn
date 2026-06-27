@@ -61,4 +61,11 @@
    :inputs    {:power-mag 231 :charge-i 241 :discharge-i 243 :idle-flag 230 :hysteresis-a 0.5}}
   {:reading-key :reading/battery-current-a
    :fn        :ilanga.protocol.growatt.codec/battery-current
-   :inputs    {:charge-i 241 :discharge-i 243}}]}
+   :inputs    {:charge-i 241 :discharge-i 243}}]
+
+ ;; Derived fields — declarative ops over already-decoded Reading fields, no
+ ;; payload (ADR-033). Protocol-agnostic; computed at ingest and stored as a
+ ;; column (TDD-02). pv-total = pv1 + pv2.
+ :derive
+ [{:reading-key :reading/pv-total-power-w :op :sum
+   :of [:reading/pv1-power-w :reading/pv2-power-w]}]}
