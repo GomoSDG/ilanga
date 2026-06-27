@@ -23,12 +23,12 @@ Fields the triple cannot express. Each entry declares the algorithm (`:fn`) and 
 
 ```edn
 :compute [{:reading-key :reading/battery-power-w
-           :fn :ilanga.protocol.growatt.codec/battery-power
+           :fn :ilanga.protocol.sacolar.codec/battery-power
            :inputs {:power-mag 231 :charge-i 241 :discharge-i 243 :idle-flag 230 :hysteresis-a 0.5}}]
 ```
 
 - **Offsets in the descriptor** (`:inputs`), not in the fn — the descriptor is the complete offset map; a protocol-doc offset change is an edn edit.
-- **Per-protocol codec namespaces** (`ilanga.protocol.growatt.codec`): computed-field logic is protocol-specific (it assumes the payload layout), so fns live with the protocol code. There is no shared `ilanga.protocol.codec` fn dump; the reusable part is the dispatch, not the fns.
+- **Per-protocol codec namespaces** (`ilanga.protocol.sacolar.codec`): computed-field logic is protocol-specific (it assumes the payload layout), so fns live with the protocol code. There is no shared `ilanga.protocol.codec` fn dump; the reusable part is the dispatch, not the fns.
 - **Multimethod dispatch.** A single `defmulti compute-field` in the generic decoder dispatches on the `:fn` keyword; each protocol's `.codec` namespace defines its methods with `defmethod`. `defmethod` *is* registration — the protocol namespace is self-contained; no central registry file to keep in sync. Startup validates that every loaded descriptor's `:fn` keys have a method (`get-method` non-nil) — fail-closed at boot, not at first decode.
 
 ```clojure
@@ -40,8 +40,8 @@ Fields the triple cannot express. Each entry declares the algorithm (`:fn`) and 
              [reading-key (compute-field fn payload inputs)])))
 ```
 ```clojure
-;; ilanga.protocol.growatt.codec
-(defmethod ilanga.protocol.decoder/compute-field :ilanga.protocol.growatt.codec/battery-power
+;; ilanga.protocol.sacolar.codec
+(defmethod ilanga.protocol.decoder/compute-field :ilanga.protocol.sacolar.codec/battery-power
   [_kw payload {:keys [power-mag charge-i discharge-i idle-flag hysteresis-a]}]
   ;; overflow-aware cond — see protocol doc "Battery power & current decode"
   ...)

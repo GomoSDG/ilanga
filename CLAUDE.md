@@ -11,8 +11,8 @@ This repo mixes two things; keep them straight:
 - **`doc/`** — the design. This is the tracked, authoritative artifact.
   - `doc/adr/` — Architecture Decision Records (`ADR-001` … `ADR-029`). Each owns one decision; `Status:` is `Accepted` / `Draft`. The model ADRs (esp. **ADR-026** multi-tenant storage, **ADR-008** persistence, **ADR-002** entity model) are load-bearing — read before touching that area.
   - `doc/design/` — Technical Design Docs (`00-architecture` … `07-runtime-platform`). `00` is the composition view; `01`–`07` expand subsystems. Several are still **stubs** (skeleton only).
-  - `doc/protocol/` — inverter wire-protocol reference (Growatt CubeWiFi).
-- **Python prototypes at the repo root** (`growatt_*.py`, `dashboard.log`, `simulator.py`, `cost_analysis.py`, `visualize.py`, `auto_investigate.py`, …) and the `data/`, `proxy_data/`, `server/`, `templates/` dirs — **exploratory scratch from before the Clojure design existed.** They are *not* the implementation and are *not* tracked. Treat them as reverse-engineering notes / data sources, not as code to extend. The Clojure implementation has not started yet.
+  - `doc/protocol/` — inverter wire-protocol reference (Sacolar inverter via CubeWiFi datalogger).
+- **Python prototypes at the repo root** (`growatt_*.py`, `dashboard.log`, `simulator.py`, `cost_analysis.py`, `visualize.py`, `auto_investigate.py`, …) and the `data/`, `proxy_data/`, `server/`, `templates/` dirs — **exploratory scratch from before the Clojure design existed.** They are *not* the implementation and are *not* tracked. Treat them as reverse-engineering notes / data sources, not as code to extend. (The actual filenames say `growatt_*`, but the device is Sacolar — see `doc/protocol/sacolar-cubewifi-data-payload.md`; the Python names predate that correction.) The Clojure implementation is in progress — ingestion core + lifecycle are built under `src/`.
 
 ## The architecture in one line
 
@@ -45,4 +45,4 @@ Three levels: **tenant** (owner / isolation boundary) → **site** (physical loc
 
 - Start at `doc/design/00-architecture.md` for the composition view.
 - `doc/adr/README.md`-style index does not exist yet; the `doc/adr/` directory is numbered and self-describing.
-- Current site (the proof-of-concept tenant `home`): 10×550W panels, 5.5 kWp, Growatt CubeWiFi inverter, Johannesburg.
+- Current site (the proof-of-concept tenant `home`): 10×550W panels, 5.5 kWp, Sacolar inverter (via CubeWiFi datalogger — Growatt-family wire protocol), Johannesburg.

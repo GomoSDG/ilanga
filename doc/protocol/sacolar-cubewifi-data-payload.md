@@ -1,6 +1,8 @@
-# Growatt CubeWiFi DATA Payload Reference
+# Sacolar inverter — CubeWiFi DATA Payload Reference
 
-All offsets, types, scales, and sign conventions in this document are confirmed against live pvbutler readings and the Sacolar/Growatt Modbus Protocol V1.2. This is the authoritative reference for the `ilanga.protocol.decoder` implementation and the ADR-018 hardware descriptor. Battery power (231) and battery current (241/243) are **codec-computed** from multiple registers with overflow handling via the descriptor's `:compute` class (ADR-033) — not single-offset fields; see [Battery power & current decode](#battery-power--current-decode).
+The device on this site is a **Sacolar** inverter, reached through a **CubeWiFi** datalogger. Sacolar (Shenzhen Sacolar New Energy) is a wholly-owned subsidiary of Growatt; it reuses the same CubeWiFi datalogger hardware and the same cloud architecture (Sacolar's cloud is `server.pvbutler.com`, surfaced by the *pvbutler* app). The **wire framing is literally the Growatt CubeWiFi protocol** — identical header, identical `b"Growatt"` XOR key, identical CRC16-Modbus, identical message types and ACK shape. The **only thing that differs is the DATA payload field-offset map** decoded below. So: *protocol = Growatt-family CubeWiFi (shared); inverter = Sacolar; payload layout = Sacolar-specific.* (Confirmed via grott: grott has no Sacolar/Sunrino profile, so it silently drops these records — `novalidrec`.)
+
+All offsets, types, scales, and sign conventions in this document are confirmed against live pvbutler readings and an APD-family Modbus register map (V1.2, sunvec.es) — the register map that the CubeWiFi repackages; it names neither brand. This is the authoritative reference for the `ilanga.protocol.decoder` implementation and the ADR-018 hardware descriptor. Battery power (231) and battery current (241/243) are **codec-computed** from multiple registers with overflow handling via the descriptor's `:compute` class (ADR-033) — not single-offset fields; see [Battery power & current decode](#battery-power--current-decode).
 
 ---
 
@@ -128,7 +130,7 @@ The overflow case is why 231 cannot be a plain signed int16: a discharge above 3
 
 This matches pvbutler's `batPower` convention (positive = discharging). The legacy `battery_power_phys` field (`= −battery_power`) inverts this — avoid it for new KPIs; use `battery_power` directly.
 
-> Both fields are codec-computed (ADR-033). They are **not** expressible as `{:offset :type :scale}` descriptor entries; the hardware descriptor references a codec fn via `:compute` in `ilanga.protocol.growatt.codec` for them (ADR-018/033).
+> Both fields are codec-computed (ADR-033). They are **not** expressible as `{:offset :type :scale}` descriptor entries; the hardware descriptor references a codec fn via `:compute` in `ilanga.protocol.sacolar.codec` for them (ADR-018/033).
 
 ---
 
@@ -183,8 +185,8 @@ Sub-command reads 21 bytes from register `0x0004`. The device's IDENTIFY respons
 
 ## External references
 
-- [Growatt Inverter Communications Protocol](https://www.ietfng.org/nwf/misc/growatt-protocol.html) — packet framing, XOR obfuscation, handshake
-- [Sacolar/Growatt Modbus Protocol V1.2](https://sunvec.es/wp-content/uploads/2023/05/Modbus-Protocol-V1.2-2.pdf) — official register map confirming scales for battery voltage/current/power, AC voltage/current, load power, temperature
+- [Growatt Inverter Communications Protocol](https://www.ietfng.org/nwf/misc/growatt-protocol.html) — packet framing, XOR obfuscation, handshake. Documents the CubeWiFi wire protocol (Growatt-family, shared unchanged by the Sacolar datalogger).
+- [APD-family Modbus register map V1.2](https://sunvec.es/wp-content/uploads/2023/05/Modbus-Protocol-V1.2-2.pdf) (sunvec.es) — the register map the CubeWiFi repackages; confirms scales for battery voltage/current/power, AC voltage/current, load power, temperature. Names neither brand (it is the APD inverter family map).
 
 ---
 

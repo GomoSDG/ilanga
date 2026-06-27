@@ -6,7 +6,7 @@ Accepted
 ## Context
 ADR-013 leaves open how a session or connection gets its `permission-id`. ADR-018 leaves open how a fresh TCP connection is resolved to a `hardware-id`, `tenant-id`, and `site-id`. Both gaps converge at the same moment: the device opens a TCP connection, sends an announce packet, and the server must decide (a) whether to accept the connection at all, (b) which hardware descriptor to use for decoding, and (c) which permission set applies to readings from this device.
 
-The Growatt CubeWiFi presents no credential — it sends a serial number in the announce packet. That is the only identity token the device offers.
+The Sacolar inverter (via its CubeWiFi datalogger) presents no credential — it sends a serial number in the announce packet. That is the only identity token the device offers.
 
 The threat model is a home LAN: the perimeter is the local network. The authentication question is "is this a device we registered?" not "did it prove its identity cryptographically?"
 
@@ -19,7 +19,7 @@ Authentication is serial-based allowlisting. A device is authorised if and only 
 ```clojure
 ;; Config store — device registry entry
 {:device/serial        "SERIAL123"
- :device/hardware-id   :growatt-cubewifi   ;; → ADR-018 hardware mapping
+ :device/hardware-id   :sacolar/cubewifi   ;; → ADR-018 hardware mapping
  :device/tenant-id     "home"              ;; → the owner / isolation boundary (ADR-026); drives open-store
  :device/site-id       "home"              ;; → which site's rows; parallel inverters share this (ADR-026); stamped on each Reading
  :device/permission-id :default            ;; → ADR-013 permission set for this device's data

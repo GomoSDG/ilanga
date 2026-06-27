@@ -1,10 +1,10 @@
-# ADR-018: Ingestion — TCP Server, Growatt Protocol, Hardware Mapping, Canonical Reading
+# ADR-018: Ingestion — TCP Server, CubeWiFi Protocol, Hardware Mapping, Canonical Reading
 
 ## Status
 Accepted
 
 ## Context
-The Growatt CubeWiFi inverter initiates an outbound TCP connection to a server and pushes binary DATA packets at a regular interval. The system must receive these packets, decode them into canonical Reading entities, persist them to DuckDB, and emit a `:new-reading` signal to the pipeline (ADR-007).
+The Sacolar inverter (reached via a Growatt-family CubeWiFi datalogger) initiates an outbound TCP connection to a server and pushes binary DATA packets at a regular interval. The wire framing is the shared CubeWiFi protocol; only the DATA payload offset map is Sacolar-specific (see [`doc/protocol/sacolar-cubewifi-data-payload.md`](../protocol/sacolar-cubewifi-data-payload.md)). The system must receive these packets, decode them into canonical Reading entities, persist them to DuckDB, and emit a `:new-reading` signal to the pipeline (ADR-007).
 
 The system is designed to scale to multiple tenants, multiple sites, and multiple inverter connections (ADR-026: tenant = isolation, site = location, device = inverter). Starting small (few devices) is a proof-of-concept phase, not a design constraint — "starting small ≠ designing small."
 
@@ -30,19 +30,19 @@ The framing, CRC validation, and payload decoding logic is transport-agnostic �
 
 After decoding, the canonical Reading is placed on a core.async channel. The pipeline (ADR-007) consumes from this channel and emits the `:new-reading` signal. This decouples ingestion from pipeline processing and gives the system a natural buffer.
 
-### Growatt Cloud: Terminate with minimal server emulation; forwarding is a config toggle defaulting off
+### Vendor Cloud: Terminate with minimal server emulation; forwarding is a config toggle defaulting off
 
-The Clojure server terminates the inverter connection. It does not forward packets to Growatt's cloud by default.
+The Clojure server terminates the inverter connection. It does not forward packets to Sacolar's cloud (pvbutler, `server.pvbutler.com`) by default.
 
-The CubeWiFi expects server-side acknowledgements and keepalives to maintain its connection. The ingestion layer emulates the minimal server responses the device requires — enough to keep it streaming, nothing more. This is simpler and more stable than full MITM forwarding because the contract depends on the device's outbound packet format (stable, under our control) rather than Growatt's server API (can change, can enforce TLS pinning, can add auth, can break silently on firmware update).
+The CubeWiFi expects server-side acknowledgements and keepalives to maintain its connection. The ingestion layer emulates the minimal server responses the device requires — enough to keep it streaming, nothing more. This is simpler and more stable than full MITM forwarding because the contract depends on the device's outbound packet format (stable, under our control) rather than Sacolar's server API (can change, can enforce TLS pinning, can add auth, can break silently on firmware update).
 
-Forwarding to Growatt's cloud is available as a config-store toggle (ADR-004/005), defaulting off. Enabling it is a runtime decision requiring no deploy. Rationale for defaulting off: forwarding sends household energy data to a third party indefinitely and makes Growatt's cloud an uptime dependency of the system — contrary to the self-contained, data-sovereign character of the architecture (ADR-012).
+Forwarding to Sacolar's cloud (pvbutler) is available as a config-store toggle (ADR-004/005), defaulting off. Enabling it is a runtime decision requiring no deploy. Rationale for defaulting off: forwarding sends household energy data to a third party indefinitely and makes Sacolar's cloud an uptime dependency of the system — contrary to the self-contained, data-sovereign character of the architecture (ADR-012).
 
 ### Hardware Mapping: ADR-005 registry pattern, developer-authored only
 
 Hardware mapping is a deploy-time registry descriptor following the ADR-005 pattern — not the ADR-006 function+descriptor pattern (which is specific to actions).
 
-The descriptor covers **framing** (`:framing` — header layout, CRC spec, obfuscation spec; vocabulary in **ADR-034**) **plus field classes** (`:fields`/`:compute`/`:derive`, ADR-033). **Framing is data-driven**: a generic framer (at the connection) de-frames from `:framing` — for Growatt no per-protocol framing code is needed. Per-protocol framing code is the escape-hatch for a protocol whose framing the `:framing` vocabulary can't express (mirroring `:compute`). What remains per-protocol code is **message-type routing** (ack/keepalive/TIME_SYNC/ANNOUNCE) — the Growatt handler, which knows nothing about fields. Full protocol detail is in [`doc/protocol/growatt-cubewifi-data-payload.md`](../protocol/growatt-cubewifi-data-payload.md). A new inverter model using the same Growatt protocol = new descriptor, no new code. A new protocol = new code (routing handler) unless its framing is `:framing`-expressible.
+The descriptor covers **framing** (`:framing` — header layout, CRC spec, obfuscation spec; vocabulary in **ADR-034**) **plus field classes** (`:fields`/`:compute`/`:derive`, ADR-033). **Framing is data-driven**: a generic framer (at the connection) de-frames from `:framing` — for the CubeWiFi family no per-protocol framing code is needed. Per-protocol framing code is the escape-hatch for a protocol whose framing the `:framing` vocabulary can't express (mirroring `:compute`). What remains per-protocol code is **message-type routing** (ack/keepalive/TIME_SYNC/ANNOUNCE) — the Sacolar handler, which knows nothing about fields. (The CubeWiFi message types are Growatt-family-shared; whether the handler logic promotes to a family handler is deferred until a second CubeWiFi-family device lands — for now it is vendor-named, `ilanga.protocol.sacolar`.) Full protocol detail is in [`doc/protocol/sacolar-cubewifi-data-payload.md`](../protocol/sacolar-cubewifi-data-payload.md). A new inverter model using the same CubeWiFi protocol = new descriptor, no new code. A new protocol = new code (routing handler) unless its framing is `:framing`-expressible.
 
 The generic decoder reads offsets, types, and scale factors from the descriptor and extracts field values. Note: there is no single `pv_total` field in the packet — total PV power is computed as `pv1 + pv2`.
 
@@ -51,9 +51,9 @@ The descriptor's **shape** (what this decision fixes) — a pure-data map of fra
 ```clojure
 ;; Illustrative shape only — NOT authoritative content.
 ;; Authoritative offsets/types/scales live in the protocol doc and the actual descriptor file:
-;;   doc/protocol/growatt-cubewifi-data-payload.md   (byte-level reference, evolves with understanding)
+;;   doc/protocol/sacolar-cubewifi-data-payload.md   (byte-level reference, evolves with understanding)
 ;;   resources/hardware/<model>.edn                 (the real descriptor data, evolves per model)
-{:hardware-id :growatt/<model>
+{:hardware-id :sacolar/<model>
  :payload-len 349
  :framing    {:proto-xor 0x0006 :xor-key "Growatt"
               :crc {:algorithm :crc16-modbus :poly 0xA001 :init 0xFFFF
@@ -83,7 +83,7 @@ When a device connects, its serial number is extracted from the announce packet.
 ```clojure
 ;; Config store — device registry (runtime, no deploy)
 {:device/serial        "SERIAL123"
- :device/hardware-id   :growatt-cubewifi
+ :device/hardware-id   :sacolar/cubewifi
  :device/tenant-id     "home"        ;; the owner / isolation boundary (ADR-026)
  :device/site-id       "home"        ;; the location; parallel inverters share this (ADR-026)
  :device/permission-id :default
@@ -95,7 +95,7 @@ Unknown serials are rejected at the connection level — see ADR-020 for the ful
 ### Full Ingestion Flow
 
 ```
-Growatt CubeWiFi (outbound TCP)
+Sacolar inverter via CubeWiFi (outbound TCP)
     → Aleph TCP server (listens on configured port)
     → Manifold stream per connection
         → frame accumulation (length-prefixed packet)
@@ -115,7 +115,7 @@ Connection-level concerns on the Manifold stream:
 - Hardware mapping dispatch (which descriptor to use for this device)
 - Permission-id association (ADR-013) — which tenant/site this connection belongs to
 - Reconnect and idle/timeout handling
-- Forwarding toggle (if enabled, copy raw packet to Growatt endpoint)
+- Forwarding toggle (if enabled, copy raw packet to the Sacolar/pvbutler endpoint)
 
 ## Rationale Summary
 - Aleph: multi-device design intent requires non-blocking transport with per-connection lifecycle; migration from raw sockets would rewrite exactly the part Aleph already solves
@@ -132,4 +132,4 @@ Connection-level concerns on the Manifold stream:
 - (-) Aleph/Manifold adds a dependency and a new conceptual model (streams vs threads) — developers must understand backpressure and stream lifecycle
 - (-) Minimal server emulation requires understanding what acks/keepalives the CubeWiFi expects — this must be empirically verified and may need adjustment on firmware updates
 - (-) The inverter has no independent time source — it sets its clock to exactly what TIME_SYNC sends. The server must send explicit UTC (not JVM default zone); a wrong timezone propagates to every inverter_timestamp until reconnect. Timezone conversion is the application's responsibility at display time.
-- (-) Hardware mapping offsets are in the descriptor (deploy to change) — if Growatt changes its packet format in a firmware update, a descriptor edit + redeploy is required. Offsets live in the edn (`:fields`/`:compute :inputs`), not in code (ADR-033). — if Growatt changes its packet format in a firmware update, a deploy is required to update the descriptor
+- (-) Hardware mapping offsets are in the descriptor (deploy to change) — if the CubeWiFi packet format changes in a firmware update, a descriptor edit + redeploy is required. Offsets live in the edn (`:fields`/`:compute :inputs`), not in code (ADR-033). — if the CubeWiFi packet format changes in a firmware update, a deploy is required to update the descriptor

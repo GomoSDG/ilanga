@@ -3,7 +3,7 @@
 **Status:** In progress — component responsibility, descriptor shape, and decode flow flushed. Field offsets are *not* enumerated here; the byte-level reference is the protocol doc, and the actual descriptor data is `resources/hardware/<model>.edn`.
 
 ## Purpose & scope
-The path from a Growatt CubeWiFi TCP connection to a canonical `Reading` written to DuckDB and handed to the engine as `:new-reading`. Covers the TCP server, the Growatt wire protocol (framing, XOR obfuscation, CRC16), the hardware-mapping descriptor that turns a decoded payload into Reading fields, device registration/auth, and the core.async handoff to the pipeline. **Excludes** the pipeline dispatch and KPI computation (03) and the storage layout (02).
+The path from a CubeWiFi TCP connection (Sacolar inverter) to a canonical `Reading` written to DuckDB and handed to the engine as `:new-reading`. Covers the TCP server, the CubeWiFi wire protocol (Growatt-family: framing, XOR obfuscation, CRC16), the hardware-mapping descriptor that turns a decoded payload into Reading fields, device registration/auth, and the core.async handoff to the pipeline. **Excludes** the pipeline dispatch and KPI computation (03) and the storage layout (02).
 
 ## Governing ADRs
 - ADR-018 Ingestion TCP server & hardware mapping — Accepted
@@ -28,8 +28,8 @@ flowchart TD
         D["Generic decoder<br/>:fields / :compute / :derive"]
         IG["ingest<br/>decode → validate → write → emit (producer)"]
     end
-    subgraph ADAPTER["Adapter — per-protocol code (src/ilanga/protocol/growatt/)"]
-        H["Growatt handler<br/>control-msg routing: ack / TIME_SYNC / ANNOUNCE"]
+    subgraph ADAPTER["Adapter — per-protocol code (src/ilanga/protocol/sacolar/)"]
+        H["Sacolar handler<br/>control-msg routing: ack / TIME_SYNC / ANNOUNCE"]
         K["Codec fns (defmethod)"]
     end
     subgraph DATA["Data & config — not code"]
@@ -60,11 +60,11 @@ flowchart TD
 | Component | Scope | Responsibility (accountable for / guarantees) | Collaborators |
 |---|---|---|---|
 | Aleph TCP server | protocol-agnostic | Byte delivery per connection; per-connection isolation + backpressure. Not accountable for packet meaning. | Connection / session |
-| Connection / session | protocol-agnostic | The connection: identity binding + per-packet recovery/routing. Identity bound before any packet routed; control messages handled on-stream; DATA handed to ingest; unknown serials rejected. | device registry (ADR-020), `open-store`/`TenantStore` (ADR-026), generic framer, Growatt handler, packet-channel |
+| Connection / session | protocol-agnostic | The connection: identity binding + per-packet recovery/routing. Identity bound before any packet routed; control messages handled on-stream; DATA handed to ingest; unknown serials rejected. | device registry (ADR-020), `open-store`/`TenantStore` (ADR-026), generic framer, Sacolar handler, packet-channel |
 | Generic framer | protocol-agnostic | Packet recovery. Only CRC-valid, de-obfuscated payloads emerge; data-driven from `:framing`; rejects malformed packets. | connection (driver), descriptor (`:framing`) |
-| Growatt handler | per-protocol | Control-message handling. ack/keepalive + UTC TIME_SYNC + ANNOUNCE serial extraction; knows nothing about fields/data. | connection stream, device registry |
+| Sacolar handler | per-protocol | Control-message handling. ack/keepalive + UTC TIME_SYNC + ANNOUNCE serial extraction; knows nothing about fields/data. (CubeWiFi message types are Growatt-family-shared; whether this handler promotes to a family handler is deferred until a 2nd CubeWiFi-family device lands.) | connection stream, device registry |
 | ingest | protocol-agnostic | Telemetry→fact→signal. field-decode → Malli → idempotent `write!` → emit on `:inserted` only; all error paths dead-lettered; the channel producer. | generic decoder, Malli, `write!`, packet-channel (drains), reading-channel (puts) |
-| Generic decoder | protocol-agnostic | Producing the canonical Reading. Carries every key the descriptor declares; the only place field extraction/computation; no Growatt knowledge. | ingest (caller), descriptor, codec fns |
+| Generic decoder | protocol-agnostic | Producing the canonical Reading. Carries every key the descriptor declares; the only place field extraction/computation; no vendor/protocol knowledge. | ingest (caller), descriptor, codec fns |
 | Codec fns (multimethod) | per-protocol (`.codec` ns) | Computed-field correctness. Pure, defmethod-registered (fail-closed), decode matches the protocol doc. | generic decoder (`defmulti` host), descriptor (`:inputs`) |
 | Hardware descriptor (data) | per-hardware-id/model | Declaring a model's complete framing+field+offset map. Pure data, no logic; the device's truth (protocol doc is the byte authority). | generic framer (`:framing`), generic decoder (`:fields`/`:compute`/`:derive`) — both read-only |
 | Malli validation | protocol-agnostic | The canonical-shape gate. No Reading persists unless it conforms. | ingest (invokes), `Reading` schema (TDD-02) |
@@ -76,12 +76,12 @@ Framing is data-driven (generic framer from `:framing`), not per-protocol code; 
 ## Interfaces
 - **Aleph TCP server:** accept → wait for announce (timeout ~10s) → serial lookup in device registry → bind `hardware-id`/`tenant-id`/`site-id`/`permission-id` to the Manifold stream → `open-store(tenant-id)` → `TenantStore` (ADR-026) → time-sync (`0x18`) → keepalive loop → normal packet processing. `site-id` is stamped onto each Reading this connection produces.
 - **Hardware descriptor** (`resources/hardware/<model>.edn`) — pure data: `:framing` (drives the generic framer), plus three field classes (ADR-033): `:fields` (single-offset triples), `:compute` (codec-fn refs + `:inputs`), `:derive` (declarative ops over reading keys). Offsets/types/scales are authoritative in the protocol doc; the edn transcribes them.
-- **Codec fns** — per-protocol namespaces (`ilanga.protocol.growatt.codec`), extending `defmulti compute-field` in the generic decoder via `defmethod`; `:fn` keyword = dispatch value. `defmethod` is registration (protocol ns self-contained); startup validates every descriptor `:fn` has a method.
+- **Codec fns** — per-protocol namespaces (`ilanga.protocol.sacolar.codec`), extending `defmulti compute-field` in the generic decoder via `defmethod`; `:fn` keyword = dispatch value. `defmethod` is registration (protocol ns self-contained); startup validates every descriptor `:fn` has a method.
 - **Canonical `Reading`** map emitted on `:new-reading` (namespaced keys, units per ADR-019; derived fields like pv-total included per ADR-033).
 - **core.async channels — two seams:** packet-channel (connection→ingest, DATA payloads, buffered, blocking-put) and reading-channel (ingest→engine, Readings). The reading-channel's capacity/backpressure/overflow policy is a deferred decision (see Open / deferred).
 
 ## Data structures / schemas
-- **Growatt packet framing** (`[seq 2B BE][proto 2B][len 2B][unit 1B][type 1B][XOR payload][CRC16 2B BE]`), XOR key `b"Growatt"` for `proto 0x0006`, CRC16 Modbus poly `0xA001` init `0xFFFF`. Full byte-level detail in [`doc/protocol/growatt-cubewifi-data-payload.md`](../protocol/growatt-cubewifi-data-payload.md) — that file is the authoritative offset reference; offsets are *not* duplicated here. The descriptor's `:framing` block (sequential header widths, `:counts` length semantics, crc covers, obfuscation trigger) drives the generic framer; its vocabulary is **ADR-034**.
+- **CubeWiFi packet framing** (`[seq 2B BE][proto 2B][len 2B][unit 1B][type 1B][XOR payload][CRC16 2B BE]`), XOR key `b"Growatt"` for `proto 0x0006`, CRC16 Modbus poly `0xA001` init `0xFFFF`. Full byte-level detail in [`doc/protocol/sacolar-cubewifi-data-payload.md`](../protocol/sacolar-cubewifi-data-payload.md) — that file is the authoritative offset reference; offsets are *not* duplicated here. The descriptor's `:framing` block (sequential header widths, `:counts` length semantics, crc covers, obfuscation trigger) drives the generic framer; its vocabulary is **ADR-034**.
 - **Device registry entry** (`:device/serial`, `:device/hardware-id`, `:device/tenant-id`, `:device/site-id`, `:device/permission-id`, `:device/label`) — the one lookup that resolves the whole connection identity (ADR-020). `tenant-id` drives `open-store`; `site-id` stamps readings; parallel inverters share a `site-id`.
 - **Hardware-mapping descriptor** — developer-authored only (no LLM catalog entry; explicit exception to ADR-005). Covers `:framing` + `:fields`/`:compute`/`:derive` (ADR-033). The descriptor is the complete framing+field map *and* the complete offset map for the model.
 - **Field classification** (per ADR-033, not enumerated here):
@@ -93,7 +93,7 @@ Framing is data-driven (generic framer from `:framing`), not per-protocol code; 
 ## Sequences / flows
 - **Connection lifecycle** (ADR-020): no DuckDB write and no hardware-id dispatch before the serial lookup succeeds.
 - **Decode pipeline (structural fire-and-forget):** the connection drives the generic **framer** (de-frame → CRC → de-obfuscate, from `:framing`) and **routes** — control messages to the handler inline, DATA payloads `>!!` onto a buffered **packet-channel** (blocking-put, never drop). A single supervised FIFO worker drains the packet-channel into **ingest**, which runs field-decode (`:fields` → `:compute` → `:derive`) → Malli validate → `write!` → `put!` on the **reading-channel** *only on `:inserted`* (replays `:noop` and dead-letters are silent — one fact, one `:new-reading`). Two channels: packet-channel (connection→ingest) decouples cheap read+de-frame from the slow DuckDB write and absorbs BUFFERED_DATA reconnect bursts; reading-channel (ingest→engine) decouples ingestion from the pipeline.
-- **Forward-to-Growatt-cloud** (terminate-with-emulation) as a config toggle, default off.
+- **Forward-to-vendor-cloud** (pvbutler; terminate-with-emulation) as a config toggle, default off.
 - **New inverter model (same protocol)** = new descriptor file = deploy; no parsing-logic change (framing is data-driven, no framing code). New protocol = new code (routing handler + `.codec` ns) unless its framing is `:framing`-expressible.
 
 ## Invariants & error modes

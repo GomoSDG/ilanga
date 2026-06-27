@@ -25,7 +25,7 @@ the implementation and are not tracked.
 - [`doc/design/`](doc/design/) — Technical Design Docs (`01`–`07`) expanding
   each subsystem (several are still stubs).
 - [`doc/protocol/`](doc/protocol/) — inverter wire-protocol reference
-  (Growatt CubeWiFi).
+  (Sacolar inverter via CubeWiFi datalogger).
 
 See [`CLAUDE.md`](CLAUDE.md) for the standing constraints (determinism,
 credential isolation, UTC-vs-local timezone, immutability) and the tenancy model
