@@ -10,6 +10,8 @@ The path from a CubeWiFi TCP connection (Sacolar inverter) to a canonical `Readi
 - ADR-020 Connection auth & device registration — Accepted
 - ADR-033 Computed & derived field representation in hardware descriptors — Accepted
 - ADR-034 Framing descriptor vocabulary & data-driven framer — Accepted
+- ADR-036 Connection family taxonomy — Accepted (push-stream is one family)
+- ADR-037 Push-stream control-routing descriptor vocabulary — Accepted
 
 ## Component responsibility
 
@@ -28,8 +30,8 @@ flowchart TD
         D["Generic decoder<br/>:fields / :compute / :derive"]
         IG["ingest<br/>decode → validate → write → emit (producer)"]
     end
-    subgraph ADAPTER["Adapter — per-protocol code (src/ilanga/protocol/sacolar/)"]
-        H["Sacolar handler<br/>control-msg routing: ack / TIME_SYNC / ANNOUNCE"]
+    subgraph ADAPTER["Adapter — per-protocol code (src/ilanga/protocol/sacolar/) + family handler"]
+        H["Push-stream family handler<br/>control-msg routing: ack / TIME_SYNC / IDENTIFY (ADR-036/037)"]
         K["Codec fns (defmethod)"]
     end
     subgraph DATA["Data & config — not code"]
@@ -60,9 +62,9 @@ flowchart TD
 | Component | Scope | Responsibility (accountable for / guarantees) | Collaborators |
 |---|---|---|---|
 | Aleph TCP server | protocol-agnostic | Byte delivery per connection; per-connection isolation + backpressure. Not accountable for packet meaning. | Connection / session |
-| Connection / session | protocol-agnostic | The connection: identity binding + per-packet recovery/routing. Identity bound before any packet routed; control messages handled on-stream; DATA handed to ingest; unknown serials rejected. | device registry (ADR-020), `open-store`/`TenantStore` (ADR-026), generic framer, Sacolar handler, packet-channel |
+| Connection / session | protocol-agnostic | The connection: identity binding + per-packet recovery/routing. Identity bound before any packet routed; control messages handled on-stream; DATA handed to ingest; unknown serials rejected. | device registry (ADR-020), `open-store`/`TenantStore` (ADR-026), generic framer, push-stream family handler (ADR-037), packet-channel |
 | Generic framer | protocol-agnostic | Packet recovery. Only CRC-valid, de-obfuscated payloads emerge; data-driven from `:framing`; rejects malformed packets. | connection (driver), descriptor (`:framing`) |
-| Sacolar handler | per-protocol | Control-message handling. ack/keepalive + UTC TIME_SYNC + ANNOUNCE serial extraction; knows nothing about fields/data. (CubeWiFi message types are Growatt-family-shared; whether this handler promotes to a family handler is deferred until a 2nd CubeWiFi-family device lands.) | connection stream, device registry |
+| Push-stream family handler | family (data-driven) | Control-message handling. ack/keepalive + UTC TIME_SYNC + IDENTIFY + ANNOUNCE serial extraction; knows nothing about fields/data. Data-driven off the descriptor `:push-stream` block (ADR-037); the handshake sequence is coded in the handler pending a 2nd push-stream device. Promoted from a vendor-named Sacolar handler once the push-stream family was recognized (ADR-036). | connection stream, device registry |
 | ingest | protocol-agnostic | Telemetry→fact→signal. field-decode → Malli → idempotent `write!` → emit on `:inserted` only; all error paths dead-lettered; the channel producer. | generic decoder, Malli, `write!`, packet-channel (drains), reading-channel (puts) |
 | Generic decoder | protocol-agnostic | Producing the canonical Reading. Carries every key the descriptor declares; the only place field extraction/computation; no vendor/protocol knowledge. | ingest (caller), descriptor, codec fns |
 | Codec fns (multimethod) | per-protocol (`.codec` ns) | Computed-field correctness. Pure, defmethod-registered (fail-closed), decode matches the protocol doc. | generic decoder (`defmulti` host), descriptor (`:inputs`) |
@@ -94,7 +96,7 @@ Framing is data-driven (generic framer from `:framing`), not per-protocol code; 
 - **Connection lifecycle** (ADR-020): no DuckDB write and no hardware-id dispatch before the serial lookup succeeds.
 - **Decode pipeline (structural fire-and-forget):** the connection drives the generic **framer** (de-frame → CRC → de-obfuscate, from `:framing`) and **routes** — control messages to the handler inline, DATA payloads `>!!` onto a buffered **packet-channel** (blocking-put, never drop). A single supervised FIFO worker drains the packet-channel into **ingest**, which runs field-decode (`:fields` → `:compute` → `:derive`) → Malli validate → `write!` → `put!` on the **reading-channel** *only on `:inserted`* (replays `:noop` and dead-letters are silent — one fact, one `:new-reading`). Two channels: packet-channel (connection→ingest) decouples cheap read+de-frame from the slow DuckDB write and absorbs BUFFERED_DATA reconnect bursts; reading-channel (ingest→engine) decouples ingestion from the pipeline.
 - **Forward-to-vendor-cloud** (pvbutler; terminate-with-emulation) as a config toggle, default off.
-- **New inverter model (same protocol)** = new descriptor file = deploy; no parsing-logic change (framing is data-driven, no framing code). New protocol = new code (routing handler + `.codec` ns) unless its framing is `:framing`-expressible.
+- **New inverter model (same protocol)** = new descriptor file = deploy; no parsing-logic change (framing is data-driven, no framing code). New push-stream protocol (different type bytes / ack shape / time-sync format) = new descriptor `:push-stream` block, no handler edit *if* its facts fit the vocabulary (ADR-037); a `.codec` ns only if it has new computed fields. New framing = new code (the `:framer-fn` escape-hatch) unless its framing is `:framing`-expressible. A non-push-stream family = a new sibling session kind (ADR-036).
 
 ## Invariants & error modes
 - **Unknown serial** → stream closed + logged with serial (the discovery path for adding a device); never silently accepted.
