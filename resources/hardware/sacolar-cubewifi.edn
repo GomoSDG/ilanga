@@ -1,13 +1,15 @@
-;; Hardware descriptor — Growatt CubeWiFi (SPH series)
-;; DATA / BUFFERED_DATA payload (type 0x04 / 0x50), 349 bytes decrypted.
-;; Source of truth: doc/protocol/growatt-cubewifi-data-payload.md
+;; Hardware descriptor — Sacolar inverter via Growatt-family CubeWiFi datalogger
+;; (inverter model TBD). DATA / BUFFERED_DATA payload (type 0x04 / 0x50),
+;; 349 bytes decrypted. The wire framing is shared CubeWiFi (Growatt-family);
+;; only the payload offset map here is vendor-specific.
+;; Source of truth: doc/protocol/sacolar-cubewifi-data-payload.md
 ;; New inverter model = new descriptor file, zero new code (ADR-018).
 
-{:hardware-id :growatt/cubewifi
+{:hardware-id :sacolar/cubewifi
  :payload-len 349
 
  ;; Framing — data-driven generic framer vocabulary (TDD-01). No per-protocol framing
- ;; code for Growatt; the framer parses :header, derives payload_len from :length/:counts,
+ ;; code; the framer parses :header, derives payload_len from :length/:counts,
  ;; verifies :crc, and applies :obfuscation. Escape-hatch (:framer-fn) deferred, mirroring
  ;; the :derive escape-hatch in ADR-033.
  :framing
@@ -61,15 +63,15 @@
 
  ;; Computed fields — multi-register, codec-computed (ADR-033). Offsets live in
  ;; :inputs (the descriptor is the complete offset map); the algorithm is a pure
- ;; (payload, inputs) → value fn in ilanga.protocol.growatt.codec, dispatched by
+ ;; (payload, inputs) → value fn in ilanga.protocol.sacolar.codec, dispatched by
  ;; :fn. Decode + overflow/hysteresis logic: protocol doc "Battery power & current
  ;; decode". Scale/sign/overflow are resolved in the fn, so no :scale here.
  :compute
  [{:reading-key :reading/battery-power-w
-   :fn        :ilanga.protocol.growatt.codec/battery-power
+   :fn        :ilanga.protocol.sacolar.codec/battery-power
    :inputs    {:power-mag 231 :charge-i 241 :discharge-i 243 :idle-flag 230 :hysteresis-a 0.5}}
   {:reading-key :reading/battery-current-a
-   :fn        :ilanga.protocol.growatt.codec/battery-current
+   :fn        :ilanga.protocol.sacolar.codec/battery-current
    :inputs    {:charge-i 241 :discharge-i 243}}]
 
  ;; Derived fields — declarative ops over already-decoded Reading fields, no

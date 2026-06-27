@@ -5,7 +5,7 @@
             [ilanga.protocol.bytes :as b]
             [ilanga.protocol.framer :as framer]
             [ilanga.protocol.decoder :as decoder]
-            [ilanga.protocol.growatt.codec] ; registers compute-field defmethods
+            [ilanga.protocol.sacolar.codec] ; registers compute-field defmethods
             [ilanga.domain.readings :as readings]
             [ilanga.ingest :as ingest]
             [ilanga.db :as db]
@@ -19,7 +19,7 @@
 (def ^:private capture-file
   "proxy_data/proxy_DEVICE->SERVER_20260620_043519_seq001d4_type04.bin")
 
-(def ^:private descriptor-resource "hardware/cubewifi.edn")
+(def ^:private descriptor-resource "hardware/sacolar-cubewifi.edn")
 
 (defn- capture-bytes []
   (let [f (File. capture-file)]
@@ -33,7 +33,7 @@
    :reading/seq           0x01d4
    :reading/device-serial "UMC0D6805H"
    :reading/site-id       "home"
-   :reading/hardware-id   :growatt/cubewifi
+   :reading/hardware-id   :sacolar/cubewifi
    :reading/received-at   (Instant/parse "2026-06-20T04:35:20Z")
    :reading/pv1-power-w   100.0
    :reading/pv2-power-w   200.0})
@@ -106,7 +106,7 @@
           base    (decoder/decode desc pkt)
           reading (merge base
                          {:reading/seq         (:seq pkt)
-                          :reading/hardware-id :growatt/cubewifi
+                          :reading/hardware-id :sacolar/cubewifi
                           :reading/site-id     "home"
                           :reading/received-at (Instant/now)})
           tenant  "test-replay"]

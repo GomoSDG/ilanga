@@ -13,7 +13,7 @@
    :reading/seq            0x0001
    :reading/device-serial  "TEST-SERIAL"
    :reading/site-id        site-id
-   :reading/hardware-id    :growatt/cubewifi
+   :reading/hardware-id    :sacolar/cubewifi
    :reading/received-at    (Instant/parse ts)
    :reading/pv1-power-w    100.0
    :reading/pv2-power-w     200.0

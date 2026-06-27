@@ -1,6 +1,6 @@
 (ns ilanga.protocol.bytes)
 ;; Pure byte primitives shared by the framer, decoder, and codec fns.
-;; No Growatt knowledge here — these are wire-level utilities.
+;; No vendor/protocol knowledge here — these are wire-level utilities.
 
 (defn read-uint8 [bs off]
   (bit-and (aget bs off) 0xFF))

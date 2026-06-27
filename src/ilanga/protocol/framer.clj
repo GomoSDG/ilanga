@@ -1,7 +1,7 @@
 (ns ilanga.protocol.framer
   (:require [ilanga.protocol.bytes :as b]))
 ;; Generic framer — recovers packet structure from raw wire bytes, parameterized
-;; ONLY by the descriptor's :framing block (ADR-034). No Growatt knowledge.
+;; ONLY by the descriptor's :framing block (ADR-034). No vendor/protocol knowledge.
 ;; The connection drives this and routes its output (TDD-01).
 
 (defn- header-fields [framing]

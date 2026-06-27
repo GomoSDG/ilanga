@@ -6,7 +6,7 @@
   (:import [java.time ZonedDateTime ZoneOffset]))
 ;; Generic decoder — turns a de-framed packet's payload into a canonical Reading
 ;; map (measurement + serial + timestamp keys), driven by the descriptor's
-;; :fields/:compute/:derive (ADR-033). No Growatt knowledge; computed fields are
+;; :fields/:compute/:derive (ADR-033). No vendor/protocol knowledge; computed fields are
 ;; dispatched to per-protocol codec fns via `compute-field`.
 
 (defmulti compute-field (fn [fn-kw _payload _inputs] fn-kw))
