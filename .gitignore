@@ -1,0 +1,26 @@
+# --- Data sovereignty (ADR-012) -------------------------------------------
+# Real packet captures and device serials never enter git. Tests guard on
+# file presence and skip if absent, so a fresh clone still passes.
+/data/
+/proxy_data/
+/DEVICE_*
+/SERVER_*
+
+# --- Local databases ------------------------------------------------------
+*.ddb
+*.ddb.wal
+
+# --- Clojure / JVM build artifacts ----------------------------------------
+/.cpcache/
+/target/
+/build/
+/classes/
+*.class
+
+# --- Python scratch (pre-Clojure reverse-engineering notes, not the impl) -
+__pycache__/
+*.pyc
+
+# --- Logs / dev artifacts -------------------------------------------------
+*.log
+/trace.edn
