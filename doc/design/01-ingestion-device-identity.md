@@ -33,18 +33,18 @@ flowchart TD
     D --> M --> W --> CH
 ```
 
-| Component | Scope | Owns |
-|---|---|---|
-| Aleph TCP server | protocol-agnostic | byte transport, per-connection Manifold stream |
-| Connection / session | protocol-agnostic | serial→identity lookup, identity binding, dispatch |
-| Protocol layer (code) | per-protocol | framing, XOR, CRC16 — packet integrity |
-| Growatt handler | per-protocol | ack/keepalive, TIME_SYNC, per-protocol glue (no field knowledge) |
-| Generic decoder | protocol-agnostic | `:fields` extraction, `:compute` dispatch, `:derive` ops |
-| Codec fns (multimethod) | per-protocol (`.codec` ns) | computed-field algorithms (battery power/current) |
-| Hardware descriptor (data) | per-hardware-id/model | offsets/types/scales, `:inputs`, `:derive` rules |
-| Malli validation | protocol-agnostic | canonical Reading shape |
-| `readings/write!` | domain | persistence (TenantStore) |
-| core.async | protocol-agnostic | engine handoff |
+| Component | Scope | Owns | Collaborators |
+|---|---|---|---|
+| Aleph TCP server | protocol-agnostic | byte transport, per-connection Manifold stream | Connection / session |
+| Connection / session | protocol-agnostic | serial→identity lookup, identity binding, dispatch | device registry (global config, ADR-020), `open-store`/`TenantStore` (ADR-026), protocol layer |
+| Protocol layer (code) | per-protocol | framing, XOR, CRC16 — packet integrity | Growatt handler, generic decoder (hands decrypted payload) |
+| Growatt handler | per-protocol | ack/keepalive, TIME_SYNC, per-protocol glue (no field knowledge) | connection stream, protocol layer, generic decoder (invokes) |
+| Generic decoder | protocol-agnostic | `:fields` extraction, `:compute` dispatch, `:derive` ops | descriptor, codec fns, Malli validation, `write!` |
+| Codec fns (multimethod) | per-protocol (`.codec` ns) | computed-field algorithms (battery power/current) | generic decoder (`defmulti` host), descriptor (`:inputs`) |
+| Hardware descriptor (data) | per-hardware-id/model | offsets/types/scales, `:inputs`, `:derive` rules | generic decoder (read-only) |
+| Malli validation | protocol-agnostic | canonical Reading shape | generic decoder (invokes), `Reading` schema (TDD-02) |
+| `readings/write!` | domain | persistence (TenantStore) | `TenantStore`, `dead_letter_readings` (ADR-032), core.async (downstream put) |
+| core.async | protocol-agnostic | engine handoff | `write!` (producer), engine (consumer, TDD-03) |
 
 The handler knows nothing about fields — it shrinks to transport glue (ack/keepalive, TIME_SYNC). All field knowledge is in the descriptor + codec fns; the decoder is generic.
 
