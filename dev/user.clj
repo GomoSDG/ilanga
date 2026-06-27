@@ -1,21 +1,31 @@
 (ns user
-  (:require [ilanga.db :as db]
+  (:require [ilanga.system :as system]
+            [ilanga.db :as db]
             [ilanga.domain.readings :as readings]))
 ;; Dev namespace — loaded via :dev alias, never compiled into the uberjar.
 
 (defonce store nil)
 
 (defn open!
-  "Open the store for the home tenant and ensure the schema exists.
+  "Start the app system, open the home tenant's store over it, ensure the schema.
    Call once at REPL startup: (open!)"
   []
-  (alter-var-root #'store
-                  (constantly (db/open-store {:tenant-id "home"})))
-  (db/ensure-schema! store)
-  :ready)
+  (let [sys (system/start)
+        app (system/app sys)]
+    (alter-var-root #'store (constantly (db/open-store app "home")))
+    (db/ensure-schema! store)
+    :ready))
+
+(defn close!
+  "Halt the app system (closes the DuckDB pool + config ds)."
+  []
+  (system/stop)
+  (alter-var-root #'store (constantly nil))
+  :stopped)
 
 (comment
   (open!)
   ;; :readings holds the Readings port impl; call the protocol fns on it.
   (readings/latest (:readings store) "home")
+  (close!)
   )

@@ -10,12 +10,35 @@
 ;; When a second entity's SQL lands, split per-entity: ilanga.db.readings, etc.
 ;; (ADR-030 growth note); open-store stays the one assembly point.
 
-(defn- duckdb-ds [tenant-id]
-  ;; File-per-tenant path shape; single tenant today uses data/home.ddb.
-  (jdbc/get-datasource (str "jdbc:duckdb:data/" tenant-id ".ddb")))
+(defn open-config-ds [path]
+  ;; The single SQLite config store; all tenants share it, scoped by section-key
+  ;; (ADR-026). Opened once at boot by the lifecycle, not per open-store call.
+  (jdbc/get-datasource (str "jdbc:sqlite:" path)))
 
-(defn- sqlite-ds []
-  (jdbc/get-datasource "jdbc:sqlite:data/config.db"))
+(defn- duckdb-ds [dir tenant-id]
+  ;; File-per-tenant path shape: {dir}/{tenant-id}.ddb (ADR-026).
+  (jdbc/get-datasource (str "jdbc:duckdb:" dir "/" tenant-id ".ddb")))
+
+;; One DuckDB datasource per tenant, opened lazily and cached for the life of the
+;; app (ADR-027 two-layer: a boot component, reused across per-connection
+;; TenantStores instead of re-opened on every open-store call).
+(defrecord DuckDbPool [dir cache])
+
+(defn ->duckdb-pool [dir]
+  (->DuckDbPool dir (atom {})))
+
+(defn get-or-open [pool tenant-id]
+  (let [cache (:cache pool)]
+    (or (get @cache tenant-id)
+        (let [ds (duckdb-ds (:dir pool) tenant-id)]
+          (swap! cache assoc tenant-id ds)
+          ds))))
+
+(defn close-all [pool]
+  ;; The cached entries are next.jdbc URL datasources (connection factories),
+  ;; not held-open connections — each execute! opens/closes its own. So closing
+  ;; the pool is just dropping the references so the files can be reclaimed.
+  (reset! (:cache pool) {}))
 
 ;; SQLite config client — injects tenant-id into section-key lookups so domain
 ;; code never types or sees tenant-id when reading config (ADR-026).
@@ -179,12 +202,13 @@
     (jdbc/execute! ds [dead-letter-ddl])))
 
 (defn open-store
-  "Construct a TenantStore for tenant-id.
-   Called once per session/connection at establishment — not at boot (ADR-027).
-   The :readings client is a DuckDbReadings (the Readings port realization)."
-  [{:keys [tenant-id]}]
-  (let [ds (duckdb-ds tenant-id)]
-    (store/->TenantStore
-     tenant-id
-     (->DuckDbReadings ds)
-     (->ConfigClient (sqlite-ds) tenant-id))))
+  "Assemble a per-connection TenantStore over the app datasources.
+   app = {:config-ds :duckdb-pool} — the boot-started components (ADR-027 two-
+   layer). Called per connection at establishment, not at boot: it only layers a
+   TenantStore over datasources the lifecycle already started. The :readings
+   client is a DuckDbReadings (the Readings port realization, ADR-035)."
+  [app tenant-id]
+  (store/->TenantStore
+   tenant-id
+   (->DuckDbReadings (get-or-open (:duckdb-pool app) tenant-id))
+   (->ConfigClient (:config-ds app) tenant-id)))

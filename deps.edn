@@ -6,7 +6,8 @@
         metosin/malli                         {:mvn/version "0.20.1"}
         com.github.seancorfield/honeysql      {:mvn/version "2.7.1390"}
         org.duckdb/duckdb_jdbc                {:mvn/version "1.5.4.0"}
-        org.xerial/sqlite-jdbc                {:mvn/version "3.53.2.0"}}
+        org.xerial/sqlite-jdbc                {:mvn/version "3.53.2.0"}
+        integrant/integrant                   {:mvn/version "1.0.1"}}
 
  :aliases
  {:run   {:main-opts ["-m" "ilanga.main"]}
@@ -15,7 +16,8 @@
 
   :dev   {:extra-paths ["dev"]
           :extra-deps  {nrepl/nrepl         {:mvn/version "1.7.0"}
-                        cider/cider-nrepl   {:mvn/version "0.60.0"}}}
+                        cider/cider-nrepl   {:mvn/version "0.60.0"}
+                        integrant/repl      {:mvn/version "0.5.1"}}}
 
   :build {:deps      {io.github.clojure/tools.build {:mvn/version "0.10.14"}}
           :ns-default build}}}

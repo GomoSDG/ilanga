@@ -8,7 +8,9 @@
             [ilanga.protocol.growatt.codec] ; registers compute-field defmethods
             [ilanga.domain.readings :as readings]
             [ilanga.ingest :as ingest]
-            [ilanga.db :as db])
+            [ilanga.db :as db]
+            [ilanga.system :as system]
+            [ilanga.test-system :refer [with-test-system]])
   (:import [java.io File]
            [java.time Instant]))
 
@@ -109,17 +111,15 @@
                           :reading/received-at (Instant/now)})
           tenant  "test-replay"]
       (is (readings/valid? reading) "stamped reading conforms to Malli schema")
-      (try
-        (let [store (db/open-store {:tenant-id tenant})
-              port  (:readings store)]
-          (db/ensure-schema! store)
-          (ingest/ingest-reading port reading)
-          (let [r (readings/latest port "home")]
-            (is (= "UMC0D6805H" (:reading/device-serial r)))
-            (is (number? (:reading/pv-total-power-w r)))
-            (is (number? (:reading/battery-power-w r)))
-            (is (readings/valid? r) "read-side Reading round-trips through valid?")))
-        (finally
-          (io/delete-file (str "data/" tenant ".ddb") true)
-          (io/delete-file (str "data/" tenant ".ddb.wal") true))))
+      (with-test-system
+       (fn [sys]
+         (let [store (db/open-store (system/app sys) tenant)
+               port  (:readings store)]
+           (db/ensure-schema! store)
+           (ingest/ingest-reading port reading)
+           (let [r (readings/latest port "home")]
+             (is (= "UMC0D6805H" (:reading/device-serial r)))
+             (is (number? (:reading/pv-total-power-w r)))
+             (is (number? (:reading/battery-power-w r)))
+             (is (readings/valid? r) "read-side Reading round-trips through valid?"))))))
     (println "[skip] persist test — capture absent:" capture-file)))

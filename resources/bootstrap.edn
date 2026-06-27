@@ -1,0 +1,7 @@
+;; Bootstrap config — the root of the root (ADR-027). The handful of parameters
+;; needed before any store exists; loaded by ilanga.system/bootstrap, overridable
+;; via ILANGA_* env vars. The config store itself is an app component that this
+;; layer makes reachable.
+{:listen-port 5273          ; Growatt CubeWiFi server port (forward — unused until Aleph)
+ :duckdb-dir  "data"        ; per-tenant DuckDB files: {dir}/{tenant-id}.ddb (ADR-026)
+ :config-db   "data/config.db"} ; single SQLite, all tenants' config (section-key scoped)
