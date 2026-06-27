@@ -30,9 +30,11 @@ Two things, both cheap now and expensive to retrofit (retrofit = rewrite):
    readings   ;; Readings port impl (ilanga.db/DuckDbReadings) — query intent in domain, SQL in adapter (ADR-035)
    config])   ;; ConfigClient (scoped) — per-tenant tariffs, rules, dashboards
 
-;; Constructed once per session/connection at establishment
-;; open-store opens both readings and config clients; exact config shape defined in TDD-02
-(def store (open-store {:tenant-id "home"}))
+;; Constructed once per session/connection at establishment, layered over the
+;; boot-started app datasources (ADR-027): app = {:config-ds :duckdb-pool}.
+;; open-store opens/caches the readings client and wraps the config client;
+;; exact config shape defined in TDD-02.
+(def store (open-store app "home"))
 
 ;; Domain protocol fns dispatch on the port; queries filter site_id, never tenant_id
 (ilanga.domain.readings/latest   (:readings store) site-id)

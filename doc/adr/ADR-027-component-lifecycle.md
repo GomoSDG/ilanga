@@ -1,7 +1,7 @@
 # ADR-027: Component Lifecycle
 
 ## Status
-Proposed
+Accepted
 
 ## Problem
 The application has multiple subsystems that depend on each other and must start in a specific order. Global config (device registry, hardware descriptors) must be accessible before the TCP server accepts connections. The config store must be open before the engine reads descriptors. On shutdown, live connections must drain before the stores are closed.
@@ -28,12 +28,24 @@ There is no decision on how the **app-component** layer's dependencies are expre
 - **Plain namespaces + atoms** — no library; manual startup functions and `defonce` atoms. Simple, but startup order and teardown are ad-hoc and hard to test.
 
 ## Open questions
-- How are subsystem configs (port numbers, file paths) passed in — EDN file, environment variables, or config store?
-- How does the REPL workflow interact with live inverter connections?
+- How does the REPL workflow interact with live inverter connections? → resolved when the TCP/Aleph component lands (ADR-028 chunk).
 
 **Already resolved (recorded here, not open):**
-- *How does `open-store` fit into the lifecycle — is it a component, or called by a component?* → Called by the connection component, once per connection, over the app-level datasources (ADR-020/026). Not a component in the app graph.
-- *Config bootstrap chicken-and-egg.* → The config store is itself an app component, so it needs its own parameters (path to `config.db`, listen port) *before* it exists. A small bootstrap layer below the config store — EDN file or environment variables for the handful of parameters needed before any store is open — is the root of the root. ADR-026's "global config is reachable before any store exists" bottoms out here: the bootstrap config is what makes the config store itself reachable.
+- *How does `open-store` fit into the lifecycle — is it a component, or called by a component?* → Called by the connection component, once per connection, over the app-level datasources (ADR-020/026). Not a component in the app graph. `ilanga.db/open-store` takes the app datasources (`app = {:config-ds :duckdb-pool}`) and assembles a `TenantStore` over them — it constructs nothing of its own.
+- *Config bootstrap chicken-and-egg.* → The config store is itself an app component, so it needs its own parameters (path to `config.db`, listen port) *before* it exists. A small bootstrap layer below the config store — `resources/bootstrap.edn` + `ILANGA_*` env overrides — is the root of the root. ADR-026's "global config is reachable before any store exists" bottoms out here: the bootstrap config is what makes the config store itself reachable.
+- *How are subsystem configs passed in?* → EDN file (`bootstrap.edn`) for the root-of-the-root, overridable by `ILANGA_*` env vars; everything else lives in the config store once it exists.
 
 ## Decision
-TODO
+**Integrant**, boot-only scope for this slice.
+
+The component graph is an EDN data map (`ilanga.system/config`), started by `ig/init` in dependency order and halted by `ig/halt!`. This slice wires only the two app datasources the next chunk depends on: `:ilanga/config-ds` (SQLite) and `:ilanga/duckdb-pool` (a tenant→datasource pool). `ilanga.system/app` projects the started system into the plain `{:config-ds :duckdb-pool}` map that `open-store` takes, so the adapter is not coupled to Integrant keys.
+
+Rationale:
+- **Data-as-graph matches the descriptors-as-data ethos (ADR-005).** The system is an EDN map, not code; components and their dependencies are inspectable and reloadable as data.
+- **Explicit, inspectable dependency order.** `ig/init` derives order from the graph; there is no implicit load order to misread. This is the disqualifier for **Mount** — its `defstate` load order is implicit and a footgun in a system with real start-order dependencies.
+- **REPL payoff.** `integrant.repl/reset` re-runs the graph interactively, the daily-development win.
+- **Component** was rejected as graph-in-code and verbose relative to Integrant's data map; **plain namespaces + atoms** as ad-hoc and hard to test.
+
+**`open-store` is not a graph component** (restated, because it is the seam the two-layer model turns on): it is called per-connection by the future TCP component over the boot-started datasources. The DuckDB datasource is opened lazily and cached by `DuckDbPool` so it is constructed once per tenant and reused across connections, not re-opened on every `open-store` call — that is the two-layer fix.
+
+Deferred to named later chunks (same "don't decide before evidence" principle as ADR-032): the **thread model** (ADR-028, lands with the Aleph/runtime chunk), **observability** (ADR-029, lands with the first real runtime), and the **`:tick`** driver (lands with the engine, TDD-03). They stay Proposed/TODO until their code exercises them.

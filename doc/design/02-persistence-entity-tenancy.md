@@ -28,13 +28,14 @@ A `TenantStore` is a **binding record** (ADR-026, amended by ADR-035): it carrie
 **`open-store` is the only construction point.** Nothing else constructs datasources; nothing else builds a `TenantStore`.
 
 ```clojure
-(defn open-store [{:keys [tenant-id]}] ...)
-;; => #solar.persistence.TenantStore{:tenant-id "home" :time-series <ds> :config <ds>}
+(defn open-store [app tenant-id] ...)
+;; app = {:config-ds :duckdb-pool} — the boot-started app datasources (ADR-027)
+;; => #ilanga.domain.store.TenantStore{:tenant-id "home" :readings <DuckDbReadings> :config <ConfigClient>}
 ```
 
-- Input: the `tenant-id`, already resolved — from the device registry for a connection (ADR-020, alongside `site-id`), from the permission-id for an LLM session (ADR-013). `open-store` does not read the registry itself. `site-id` is *not* passed to `open-store` — it is a per-query filter and a stamp on each Reading, not an isolation key.
-- Returns a `TenantStore` with both clients constructed and bound.
-- Called **once per session/connection at establishment**, not at boot (ADR-027 two-layer lifecycle). The app-level datasources (the single DuckDB file, the single SQLite file) are started once by the runtime (TDD-07); `open-store` layers a tenant-scoped binding over them.
+- Input: `app` (the boot-started datasources, ADR-027) and the `tenant-id`, already resolved — from the device registry for a connection (ADR-020, alongside `site-id`), from the permission-id for an LLM session (ADR-013). `open-store` does not read the registry itself. `site-id` is *not* passed to `open-store` — it is a per-query filter and a stamp on each Reading, not an isolation key.
+- Returns a `TenantStore` with both clients constructed and bound: a `DuckDbReadings` over the pooled DuckDB datasource for that tenant, and a `ConfigClient` over the shared config datasource.
+- Called **once per session/connection at establishment**, not at boot (ADR-027 two-layer lifecycle). The app-level datasources (the DuckDB pool, the single SQLite file) are started once by the runtime (TDD-07); `open-store` layers a tenant-scoped binding over them — it constructs no datasource of its own, only opens/caches the per-tenant DuckDB one via the pool.
 
 **How the clients get tenant-scoped (the encapsulation, per ADR-026):**
 
