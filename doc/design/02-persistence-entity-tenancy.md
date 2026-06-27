@@ -1,6 +1,6 @@
 # 02 — Persistence, Entity Model & Tenancy
 
-**Status:** In progress — persistence core (`TenantStore`, `readings` DDL, `ilanga.domain.readings/*` vocabulary, tenancy) flushed; remaining entity schemas + their DDL (Day, Period, Cycle, Incident, Tariff, BillingCycle, Reconciliation) come with TDD-03.
+**Status:** In progress — persistence core (`TenantStore`, `readings` DDL, the `Readings` port + `ilanga.ingest` use case, tenancy) flushed; the SQL realization lives in the adapter `ilanga.db` (ADR-035). Remaining entity schemas + their DDL/port methods (Day, Period, Cycle, Incident, Tariff, BillingCycle, Reconciliation) come with TDD-03.
 
 ## Purpose & scope
 How facts are stored and partitioned: the eleven domain entities, the in-process DuckDB (time-series) + SQLite JSON (config) choice, and the `TenantStore` binding whose clients encapsulate tenant scoping — making the local single-tenant file a pre-shaped cloud shard. The load-bearing abstraction is `TenantStore`; every data access goes through it. **Excludes** config-store internals and permissions (05) and the engine's use of entities (03).
@@ -8,20 +8,21 @@ How facts are stored and partitioned: the eleven domain entities, the in-process
 ## Governing ADRs
 - ADR-002 Domain entity model (11 entities) — Accepted
 - ADR-008 DuckDB + SQLite initial persistence — Accepted
-- ADR-026 Multi-tenant storage model — Accepted
+- ADR-026 Multi-tenant storage model — Accepted (amended by ADR-035)
 - ADR-033 Computed & derived field representation in hardware descriptors — Accepted
+- ADR-035 Persistence port — query intent in domain, realization in adapter — Accepted
 
 ## Interfaces
 
 ### `TenantStore` & `open-store` — the one data-access surface
 
-A `TenantStore` is a **binding record, not an interface** (ADR-026): it carries already-bound, already-tenant-scoped clients and has no query methods. Domain namespaces receive a store and use its clients directly, writing queries that filter by `site_id` (and `device-serial`) — never by `tenant_id`. They never read `(:tenant-id store)`.
+A `TenantStore` is a **binding record** (ADR-026, amended by ADR-035): it carries already-bound, already-tenant-scoped clients. Per ADR-035 those clients are **domain-defined ports** (query-vocabulary protocols) realized by the adapter — domain code calls the protocol, never a datasource, and the SQL realization lives in `ilanga.db`, not the domain. Domain namespaces receive a store and call its port impls, filtering by `site_id` (and `device-serial`) — never by `tenant_id`. They never read `(:tenant-id store)`.
 
 ```clojure
 (defrecord TenantStore
   [tenant-id     ;; string — the tenant (owner) this store is bound to (internal use only)
-   time-series    ;; DuckDB datasource (next.jdbc) — readings, days, periods, incidents (rows carry site_id)
-   config])       ;; SQLite datasource (next.jdbc, scoped) — per-tenant tariffs, rules, dashboards
+   readings      ;; Readings port impl (ilanga.db/DuckDbReadings) — query intent in domain, SQL in adapter (ADR-035)
+   config])      ;; ConfigClient (scoped wrapper) — per-tenant tariffs, rules, dashboards
 ```
 
 **`open-store` is the only construction point.** Nothing else constructs datasources; nothing else builds a `TenantStore`.
@@ -53,19 +54,21 @@ The asymmetry is intentional: **tenant scoping is structural** (file boundary / 
 
 **Datasources** — both via `next.jdbc` (same library, different JDBC drivers, ADR-008): DuckDB `{:dbtype "duckdb" :dbname "data/solar.ddb"}`, SQLite `{:dbtype "sqlite" :dbname "data/config.db"}`.
 
-### Domain query vocabulary
+### Domain query vocabulary — the `Readings` port
 
-The `ilanga.domain.readings/*` read/write functions — the read API the dashboard (TDD-08) and the engine/KPI layer (TDD-03) call. Queries take `site-id` explicitly; `tenant_id` is never an argument. `device-serial` is on the row and filterable but is not a required read argument (a site may hold parallel inverters).
+The query *intent* is a `defprotocol` (`Readings`) in `ilanga.domain.readings`; its DuckDB realization (the SQL) is in `ilanga.db/DuckDbReadings` (ADR-035). This is the read API the dashboard (TDD-08) and the engine/KPI layer (TDD-03) call. Queries take `site-id` explicitly; `tenant_id` is never an argument. `device-serial` is on the row and filterable but is not a required read argument (a site may hold parallel inverters). The protocol carries no engine, table, or type name; an in-memory `reify` of it can exercise the domain and the ingest use case with no database (ADR-035).
 
 ```clojure
-(ilanga.domain.readings/latest   store site-id)        ;; => the most-recent Reading for the site
-(ilanga.domain.readings/in-range store site-id from to) ;; => [Reading], ts-ascending, ts ∈ [from, to)
-(ilanga.domain.readings/write!    store reading)        ;; => idempotent append (see Sequences / flows)
+(readings/latest   (:readings store) site-id)          ;; => the most-recent reading row for the site
+(readings/in-range (:readings store) site-id from to)  ;; => [row], ts-ascending, ts ∈ [from, to)
+(readings/append   (:readings store) reading)          ;; => idempotent append (ON CONFLICT DO NOTHING in the adapter)
+(ingest/ingest-reading (:readings store) reading)      ;; => the use case: validate → append → dead-letter (TDD-01)
 ```
 
-- `latest` — the highest-`ts` Reading for the site. Single-device now; for parallel inverters this returns the most-recent across devices (per-device latest is a future `latest-by-device`, not needed yet).
-- `in-range` — Readings for the site with `ts ∈ [from, to)`, ordered ascending. The historical-view and KPI read path (TDD-03).
-- `write!` — the one append path (from ingestion, ADR-018). Appends the Reading; on identity conflict (a row with the same `(device_serial, ts)` already exists) the incoming Reading is **dead-lettered as `identity-conflict`, not silently dropped** — see Sequences / flows. An exact field-identical replay is a no-op (idempotent ingest); only a *differing* same-identity reading is dead-lettered.
+- `latest` — the highest-`ts` reading for the site. Single-device now; for parallel inverters this returns the most-recent across devices (per-device latest is a future `latest-by-device`, not needed yet).
+- `in-range` — readings for the site with `ts ∈ [from, to)`, ordered ascending. The historical-view and KPI read path (TDD-03).
+- `append` — the one append primitive (a port method); the adapter's realization is `INSERT … ON CONFLICT (device_serial, ts) DO NOTHING`.
+- `ingest/ingest-reading` — the use case (in `ilanga.ingest`) that ingestion (ADR-018) calls. Validates the Reading, then appends through the port. On identity conflict (a row with the same `(device_serial, ts)` already exists) the incoming Reading is **dead-lettered as `identity-conflict`, not silently dropped** — see Sequences / flows. An exact field-identical replay is a no-op (idempotent ingest); only a *differing* same-identity reading is dead-lettered. (The conflict-detect + dead-letter branch is a TDD-02 TODO; today `append`'s `ON CONFLICT DO NOTHING` treats every same-identity append as a no-op replay.)
 
 No `update!`, no `delete!` — immutability is enforced by the absence of those functions in the vocabulary (correction is supplementation, ADR-002).
 
@@ -189,14 +192,14 @@ The domain representation of one inverter snapshot — append-only, immutable (A
 - SQLite JSON config tables + `config_history` audit trail (ADR-008); the global/per-tenant split is by **section key** (per-tenant sections scoped by their key, e.g. `tariffs/home`), with **no** local `tenant_id` column — same deferral as time-series.
 
 ## Sequences / flows
-- **Reading append (the one write path)**: ingestion decodes a DATA packet → Malli-validates the Reading → `ilanga.domain.readings/write! store reading`. `write!` attempts the `INSERT`; on identity conflict it does **not** silently no-op — it compares the incoming Reading to the existing row: an exact field-identical replay is a no-op (idempotent ingest); a *differing* same-`(device_serial, ts)` reading is written to `dead_letter_readings` as `identity-conflict` (the existing row stays, immutable). Append-only; never UPDATE/DELETE. The writer emits nothing downstream; the pipeline's `:new-reading` signal is emitted off the core.async channel (ADR-018/007), not by `write!`.
+- **Reading append (the one write path)**: ingestion decodes a DATA packet → `ilanga.ingest/ingest-reading` validates the Reading and calls `readings/append` on the port (`(:readings store)`). The adapter (`DuckDbReadings`) attempts the `INSERT … ON CONFLICT (device_serial, ts) DO NOTHING`; on identity conflict it does **not** silently no-op — the use case compares the incoming Reading to the existing row: an exact field-identical replay is a no-op (idempotent ingest); a *differing* same-`(device_serial, ts)` reading is written to `dead_letter_readings` as `identity-conflict` (the existing row stays, immutable). (Conflict-detect + dead-letter is a TDD-02 TODO; today same-identity appends no-op.) Append-only; never UPDATE/DELETE. The writer emits nothing downstream; the pipeline's `:new-reading` signal is emitted off the core.async channel (ADR-018/007), not by `append`.
 - **Day finalisation** (TDD-03): Draft replaced on `:day-complete` — `ilanga.domain.days/finalize! store day` upserts the finalised per-site Day. DDL pending TDD-03.
 - **Period aggregation** (TDD-03): merge-periods monoid (ADR-011) + two-phase `:recompute` for non-derivable fields — upserts per-site Period rows. DDL pending TDD-03.
 - **Cloud migration sequence** (ADR-026 shape; ADR-008 mechanism): provision Postgres+TimescaleDB → export (stamp `tenant_id` from the file identity — ADR-026 defers the structural key to this moment; `site_id` is already a column) → bulk `COPY` into space-partitioned hypertables → migrate SQLite→JSONB → swap the clients inside `TenantStore` via `open-store` (record shape + domain namespaces unchanged) → enable row-level isolation on `tenant_id` (Postgres RLS — ADR-008) → validate via reconciliation (ADR-025).
 
 ## Invariants & error modes
 - **Append-only**: no `update!`/`delete!` in the vocabulary; a Reading is never mutated (ADR-002). Correction is supplementation.
-- **Idempotent `write!`, conflicts collected not dropped**: an exact-replay (field-identical to the existing row) is a no-op — no duplicate, no error, no dead-letter. A *differing* same-`(device_serial, ts)` reading is **dead-lettered as `identity-conflict`**, the existing row kept — collected for analysis (ADR-032), never silently dropped. Idempotent ingest holds: no duplicate fact, no error.
+- **Idempotent `append`, conflicts collected not dropped**: an exact-replay (field-identical to the existing row) is a no-op — no duplicate, no error, no dead-letter. A *differing* same-`(device_serial, ts)` reading is **dead-lettered as `identity-conflict`**, the existing row kept — collected for analysis (ADR-032), never silently dropped. Idempotent ingest holds: no duplicate fact, no error. (Conflict-detect + dead-letter is a TDD-02 TODO; today `append` no-ops on same identity.)
 - **Readings are quarantined, not silently dropped**: a Reading that fails Malli validation (or whose packet fails decode/CRC, or whose serial is unknown) goes to `dead_letter_readings` — never to `readings`. So does a *differing* same-identity reading at `write!` time (`identity-conflict`). The fact table holds only validated, identity-unique facts; nothing is silently lost (TDD-00 error modes, principle 1).
 - **No data access bypasses `TenantStore`**: a leaked direct datasource construction silently breaks the migration path. Domain code never sees `tenant_id`; tenant scoping is encapsulated in the store's clients. Domain code freely filters `site_id` / `device-serial`.
 - **`tenant_id` never a local column**: a local file is a pre-shaped cloud shard — `tenant_id` stamped from file identity at export (deferred to cloud, ADR-026); never a column domain code manages. `site_id` *is* a local column domain code freely filters.

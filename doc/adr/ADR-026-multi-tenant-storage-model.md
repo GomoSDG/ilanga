@@ -1,7 +1,7 @@
 # ADR-026: Multi-Tenant Storage Model
 
 ## Status
-Accepted
+Accepted — **amended by [ADR-035](ADR-035-persistence-port.md)**: the query vocabulary is a domain-defined port (`Readings` protocol), `TenantStore` carries port impls rather than raw datasources, and SQL realization lives in the adapter (`ilanga.db`). The "binding record, not an interface … no query methods / domain writes queries" clauses below are superseded; the load-bearing properties (one construction point, tenant-scoped clients, domain never sees `tenant_id`, filters `site_id`) are unchanged.
 
 ## Context
 ADR-018 states the system is "designed to scale to multiple tenants, multiple sites, and multiple inverter connections — starting small is a proof-of-concept phase, not a design constraint." ADR-020 introduces `:device/site-id` to group devices into sites. But ADR-008 defines only a single in-process DuckDB file (`data/solar.ddb`) and a single SQLite config — no partitioning, no `tenant_id` anywhere. The design intent (multi-tenant, multi-site) and the persistence model (single-file) do not agree.
@@ -22,22 +22,22 @@ This is a **model ADR**: it states the storage *capabilities* and *requirements*
 
 Two things, both cheap now and expensive to retrofit (retrofit = rewrite):
 
-1. **All data access goes through a `TenantStore` — a binding record, not an interface.** `TenantStore` is a plain record that carries the bound clients for one tenant. It has no query methods. Domain namespaces are the repositories; they receive a store and use its clients directly, writing queries that filter by `site_id` (and `device-serial`) but never by `tenant_id`.
+1. **All data access goes through a `TenantStore` — a binding record.** `TenantStore` is a plain record that carries the bound clients for one tenant. Domain namespaces receive a store and use its clients directly, filtering by `site_id` (and `device-serial`) but never by `tenant_id`. *(Amended by ADR-035: the clients are domain-defined ports; the store carries port impls and domain calls the protocol — the SQL realization is in the adapter, not the domain. "Not an interface / no query methods" is dropped; the binding and tenant-encapsulation properties hold.)*
 
 ```clojure
 (defrecord TenantStore
   [tenant-id
-   time-series   ;; DuckDB datasource — readings, days, periods, incidents (rows carry site_id)
-   config])      ;; SQLite datasource — per-tenant tariffs, rules, dashboards
+   readings   ;; Readings port impl (ilanga.db/DuckDbReadings) — query intent in domain, SQL in adapter (ADR-035)
+   config])   ;; ConfigClient (scoped) — per-tenant tariffs, rules, dashboards
 
 ;; Constructed once per session/connection at establishment
-;; open-store opens both time-series and config clients; exact config shape defined in TDD-02
+;; open-store opens both readings and config clients; exact config shape defined in TDD-02
 (def store (open-store {:tenant-id "home"}))
 
-;; Domain namespaces define their own query vocabulary; queries filter site_id, never tenant_id
-(ilanga.domain.readings/latest   store site-id)
-(ilanga.domain.readings/in-range store site-id from to)
-(ilanga.domain.readings/write!   store reading)   ;; reading carries :reading/site-id, :reading/device-serial
+;; Domain protocol fns dispatch on the port; queries filter site_id, never tenant_id
+(ilanga.domain.readings/latest   (:readings store) site-id)
+(ilanga.domain.readings/in-range (:readings store) site-id from to)
+(ilanga.ingest/ingest-reading    (:readings store) reading)   ;; reading carries :reading/site-id, :reading/device-serial
 
 (ilanga.domain.days/by-date   store site-id date)
 (ilanga.domain.days/finalize! store day)

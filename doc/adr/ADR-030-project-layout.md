@@ -24,10 +24,10 @@ This ADR owns the project layout decision. The per-subsystem namespace lists and
 **deps.edn + `tools.build`**, single project. Entry point `ilanga.main/-main` via a `:run` alias.
 
 **Nested namespace roots**, both under the project name, mapping to ADR-004's two layers:
-- **`ilanga.domain.*` — the data layer.** Facts, entity schemas, pure KPI/Period computation, the Malli entity registry, and the persistence *port* (the `TenantStore` record). Pure: depends only on libraries and other `ilanga.domain.*` namespaces.
-- **`ilanga.*` (top-level, non-`domain`) — the meta layer + adapters.** Ingestion and protocol decoding, engine orchestration, the LLM surface, registry/config, billing orchestration, runtime, the persistence *adapter* (`ilanga.db`, which owns `open-store`), and `main`. May depend on `ilanga.domain.*`.
+- **`ilanga.domain.*` — the data layer.** Facts, entity schemas, pure KPI/Period computation, the Malli entity registry, and the persistence *ports* (query-vocabulary protocols such as `Readings`, plus the `TenantStore` record that carries their impls). Pure: depends only on libraries and other `ilanga.domain.*` namespaces — and **never** on a storage engine: no `next.jdbc`, no SQL, no table/column-type name, no file path. The query *intent* lives here; its realization lives in the adapter (ADR-035).
+- **`ilanga.*` (top-level, non-`domain`) — the meta layer + adapters.** Ingestion and protocol decoding, engine orchestration, the LLM surface, registry/config, billing orchestration, runtime, the persistence *adapter* (`ilanga.db`, which owns `open-store` and the SQL realization of the domain's ports), and `main`. May depend on `ilanga.domain.*`.
 
-**The seam is enforced by a namespace-dependency lint rule**, not convention: `ilanga.domain.*` may never require an infra namespace; infra may require domain. This is what prevents the data layer drifting into the meta layer. The seam is also the determinism boundary (ADR-014): everything pure and inside the boundary is `ilanga.domain.*`; the boundary and everything outside is `ilanga.*`.
+**The seam is enforced by a namespace-dependency lint rule**, not convention: `ilanga.domain.*` may never require an infra namespace (and specifically may not require `next.jdbc` or any SQL/JDBC library, nor name a storage engine — ADR-035); infra may require domain. This is what prevents the data layer drifting into the meta layer and the domain coupling to an engine. The seam is also the determinism boundary (ADR-014): everything pure and inside the boundary is `ilanga.domain.*`; the boundary and everything outside is `ilanga.*`.
 
 **Directory == namespace.** Namespace segments map to path segments, so the rules above are the layout; no separate tree is specified.
 
@@ -51,6 +51,7 @@ This ADR owns the project layout decision. The per-subsystem namespace lists and
 - (-) A namespace-dependency lint config to maintain; the one genuinely fuzzy classification (engine *orchestration* = `ilanga.engine` vs *pure KPI math* = `ilanga.domain.kpis`) requires discipline — the same discipline ADR-007/010 already demand.
 - (-) Two roots to classify; a new namespace must be placed domain-vs-infra (usually obvious).
 - (-) A deployable uberjar is platform-specific — DuckDB and SQLite ship native libraries inside their jars (build on the target OS; acceptable for a single-home deployment).
+- (-/planned) `ilanga.db` holds the SQL realization for every entity's port (ADR-035). It is one namespace while only `Readings` exists; it splits per-entity into `ilanga.db.readings`, `ilanga.db.config`, `ilanga.db.days`, … when a second entity's SQL lands. `open-store` remains the single assembly point. This is a deliberate growth event, not a drift.
 
 ## Alternatives Considered
 - **Leiningen** — rejected: more magic, `project.clj` is eval'd code rather than data, heavier; the packaging convenience does not outweigh the determinism/declarative ethos.
