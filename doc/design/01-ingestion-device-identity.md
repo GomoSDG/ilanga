@@ -9,6 +9,7 @@ The path from a Growatt CubeWiFi TCP connection to a canonical `Reading` written
 - ADR-018 Ingestion TCP server & hardware mapping — Accepted
 - ADR-020 Connection auth & device registration — Accepted
 - ADR-033 Computed & derived field representation in hardware descriptors — Accepted
+- ADR-034 Framing descriptor vocabulary & data-driven framer — Accepted
 
 ## Component responsibility
 
@@ -80,7 +81,7 @@ Framing is data-driven (generic framer from `:framing`), not per-protocol code; 
 - **core.async channels — two seams:** packet-channel (connection→ingest, DATA payloads, buffered, blocking-put) and reading-channel (ingest→engine, Readings). The reading-channel's capacity/backpressure/overflow policy is a deferred decision (see Open / deferred).
 
 ## Data structures / schemas
-- **Growatt packet framing** (`[seq 2B BE][proto 2B][len 2B][unit 1B][type 1B][XOR payload][CRC16 2B BE]`), XOR key `b"Growatt"` for `proto 0x0006`, CRC16 Modbus poly `0xA001` init `0xFFFF`. Full byte-level detail in [`doc/protocol/growatt-cubewifi-data-payload.md`](../protocol/growatt-cubewifi-data-payload.md) — that file is the authoritative offset reference; offsets are *not* duplicated here.
+- **Growatt packet framing** (`[seq 2B BE][proto 2B][len 2B][unit 1B][type 1B][XOR payload][CRC16 2B BE]`), XOR key `b"Growatt"` for `proto 0x0006`, CRC16 Modbus poly `0xA001` init `0xFFFF`. Full byte-level detail in [`doc/protocol/growatt-cubewifi-data-payload.md`](../protocol/growatt-cubewifi-data-payload.md) — that file is the authoritative offset reference; offsets are *not* duplicated here. The descriptor's `:framing` block (sequential header widths, `:counts` length semantics, crc covers, obfuscation trigger) drives the generic framer; its vocabulary is **ADR-034**.
 - **Device registry entry** (`:device/serial`, `:device/hardware-id`, `:device/tenant-id`, `:device/site-id`, `:device/permission-id`, `:device/label`) — the one lookup that resolves the whole connection identity (ADR-020). `tenant-id` drives `open-store`; `site-id` stamps readings; parallel inverters share a `site-id`.
 - **Hardware-mapping descriptor** — developer-authored only (no LLM catalog entry; explicit exception to ADR-005). Covers `:framing` + `:fields`/`:compute`/`:derive` (ADR-033). The descriptor is the complete framing+field map *and* the complete offset map for the model.
 - **Field classification** (per ADR-033, not enumerated here):

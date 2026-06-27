@@ -6,14 +6,23 @@
 {:hardware-id :growatt/cubewifi
  :payload-len 349
 
+ ;; Framing — data-driven generic framer vocabulary (TDD-01). No per-protocol framing
+ ;; code for Growatt; the framer parses :header, derives payload_len from :length/:counts,
+ ;; verifies :crc, and applies :obfuscation. Escape-hatch (:framer-fn) deferred, mirroring
+ ;; the :derive escape-hatch in ADR-033.
  :framing
- {:proto-xor 0x0006         ; proto field value that triggers XOR obfuscation
-  :xor-key   "Growatt"      ; 7-byte repeating key
-  :crc       {:algorithm  :crc16-modbus
-              :poly        0xA001
-              :init        0xFFFF
-              :input-order :big-endian
-              :covers      :header+encrypted-payload}}
+ {:header      [[:seq 2 :be] [:proto 2 :be] [:length 2 :be] [:unit 1] [:type 1]]
+  :length      {:counts [:unit :type :payload]}    ; length = unit(1)+type(1)+payload_len ⇒ payload_len = length − 2
+  :crc         {:algorithm  :crc16-modbus
+                :poly        0xA001
+                :init        0xFFFF
+                :input-order :be
+                :covers      :header+payload       ; over wire bytes (pre-XOR), excl. the 2-B trailer
+                :width       2}                     ; trailing CRC width
+  :obfuscation {:when        {:proto 0x0006}        ; XOR triggered when proto == 0x0006
+                :algo        :xor-repeating
+                :key         "Growatt"              ; 7-byte repeating key
+                :applies-to  :payload}}             ; payload only; header is plaintext
 
  ;; Inverter serial: bytes 0–9, ASCII zero-padded (present in ANNOUNCE and DATA)
  :serial {:offset 0 :len 10 :encoding :ascii}
