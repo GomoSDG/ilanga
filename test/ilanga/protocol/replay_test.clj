@@ -114,10 +114,11 @@
               port  (:readings store)]
           (db/ensure-schema! store)
           (ingest/ingest-reading port reading)
-          (let [row (readings/latest port "home")]
-            (is (= "UMC0D6805H" (:device_serial row)))
-            (is (number? (:pv_total_power_w row)))
-            (is (number? (:battery_power_w row)))))
+          (let [r (readings/latest port "home")]
+            (is (= "UMC0D6805H" (:reading/device-serial r)))
+            (is (number? (:reading/pv-total-power-w r)))
+            (is (number? (:reading/battery-power-w r)))
+            (is (readings/valid? r) "read-side Reading round-trips through valid?")))
         (finally
           (io/delete-file (str "data/" tenant ".ddb") true)
           (io/delete-file (str "data/" tenant ".ddb.wal") true))))

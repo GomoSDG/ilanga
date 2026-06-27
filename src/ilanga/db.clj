@@ -2,7 +2,8 @@
   (:require [next.jdbc :as jdbc]
             [ilanga.domain.store :as store]
             [ilanga.domain.readings :as readings])
-  (:import [java.sql Timestamp]))
+  (:import [java.sql Timestamp]
+           [java.time Instant]))
 ;; ADAPTER — the DuckDB realization of the domain's Readings port (ADR-035).
 ;; SQL, table/type names, DDL, and file paths live here, never in the domain.
 ;; open-store is the only construction point for a TenantStore (ADR-026).
@@ -48,22 +49,57 @@
    :energy_total_kwh     (:reading/energy-total-kwh r)
    :pv_total_power_w     (:reading/pv-total-power-w r)})
 
+(defn- row->reading [row]
+  ;; Inverse of reading->row: snake_case columns + jdbc types -> namespaced
+  ;; Reading + Instants. NULL columns are dropped (absent key) so the result
+  ;; matches the optional-field domain model and round-trips through valid?.
+  (when row
+    (into {} (filter (comp some? val))
+          {:reading/timestamp         (Instant/from (:ts row))
+           :reading/seq               (:seq row)
+           :reading/device-serial     (:device_serial row)
+           :reading/site-id           (:site_id row)
+           :reading/hardware-id       (keyword (:hardware_id row))
+           :reading/received-at       (Instant/from (:received_at row))
+           :reading/pv1-voltage-v     (:pv1_voltage_v row)
+           :reading/pv2-voltage-v     (:pv2_voltage_v row)
+           :reading/pv1-power-w       (:pv1_power_w row)
+           :reading/pv2-power-w       (:pv2_power_w row)
+           :reading/pv1-current-a     (:pv1_current_a row)
+           :reading/pv2-current-a     (:pv2_current_a row)
+           :reading/load-power-w      (:load_power_w row)
+           :reading/ac-apparent-power-va (:ac_apparent_power_va row)
+           :reading/grid-power-w      (:grid_power_w row)
+           :reading/battery-voltage-v (:battery_voltage_v row)
+           :reading/battery-power-w   (:battery_power_w row)
+           :reading/battery-current-a (:battery_current_a row)
+           :reading/ac-input-voltage-v  (:ac_input_voltage_v row)
+           :reading/ac-output-voltage-v (:ac_output_voltage_v row)
+           :reading/ac-input-current-a  (:ac_input_current_a row)
+           :reading/grid-frequency-hz   (:grid_frequency_hz row)
+           :reading/temp-c            (:temp_c row)
+           :reading/energy-today-kwh  (:energy_today_kwh row)
+           :reading/energy-total-kwh  (:energy_total_kwh row)
+           :reading/pv-total-power-w  (:pv_total_power_w row)})))
+
 (defrecord DuckDbReadings [ds]
   readings/Readings
   (latest [_ site-id]
-    (jdbc/execute-one!
-     ds
-     ["SELECT * FROM readings
-        WHERE site_id = ?
-        ORDER BY ts DESC LIMIT 1" site-id]))
+    (row->reading
+     (jdbc/execute-one!
+      ds
+      ["SELECT * FROM readings
+         WHERE site_id = ?
+         ORDER BY ts DESC LIMIT 1" site-id])))
   (in-range [_ site-id from to]
-    (jdbc/execute!
-     ds
-     ["SELECT * FROM readings
-        WHERE site_id = ?
-          AND ts >= CAST(? AS TIMESTAMPTZ)
-          AND ts <  CAST(? AS TIMESTAMPTZ)
-        ORDER BY ts ASC" site-id from to]))
+    (mapv row->reading
+          (jdbc/execute!
+           ds
+           ["SELECT * FROM readings
+              WHERE site_id = ?
+                AND ts >= CAST(? AS TIMESTAMPTZ)
+                AND ts <  CAST(? AS TIMESTAMPTZ)
+              ORDER BY ts ASC" site-id from to])))
   (append [_ reading]
     (let [row (reading->row reading)]
       (jdbc/execute-one!

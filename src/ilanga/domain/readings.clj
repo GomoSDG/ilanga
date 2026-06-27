@@ -60,7 +60,7 @@
    satisfy this protocol with no database at all."
 
   (latest   [this site-id]
-    "Most-recent reading for site-id, across all devices at the site. Row or nil.")
+    "Most-recent Reading for site-id, across all devices at the site. Reading or nil.")
   (in-range [this site-id from to]
     "Readings for site-id with ts ∈ [from, to), ascending. from/to are instants.")
   (append   [this reading]

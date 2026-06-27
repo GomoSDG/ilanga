@@ -59,8 +59,8 @@ The asymmetry is intentional: **tenant scoping is structural** (file boundary / 
 The query *intent* is a `defprotocol` (`Readings`) in `ilanga.domain.readings`; its DuckDB realization (the SQL) is in `ilanga.db/DuckDbReadings` (ADR-035). This is the read API the dashboard (TDD-08) and the engine/KPI layer (TDD-03) call. Queries take `site-id` explicitly; `tenant_id` is never an argument. `device-serial` is on the row and filterable but is not a required read argument (a site may hold parallel inverters). The protocol carries no engine, table, or type name; an in-memory `reify` of it can exercise the domain and the ingest use case with no database (ADR-035).
 
 ```clojure
-(readings/latest   (:readings store) site-id)          ;; => the most-recent reading row for the site
-(readings/in-range (:readings store) site-id from to)  ;; => [row], ts-ascending, ts ∈ [from, to)
+(readings/latest   (:readings store) site-id)          ;; => the most-recent Reading for the site, or nil
+(readings/in-range (:readings store) site-id from to)  ;; => [Reading], ts-ascending, ts ∈ [from, to)
 (readings/append   (:readings store) reading)          ;; => idempotent append (ON CONFLICT DO NOTHING in the adapter)
 (ingest/ingest-reading (:readings store) reading)      ;; => the use case: validate → append → dead-letter (TDD-01)
 ```
