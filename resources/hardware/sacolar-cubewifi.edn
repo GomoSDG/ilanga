@@ -26,8 +26,26 @@
                 :key         "Growatt"              ; 7-byte repeating key
                 :applies-to  :payload}}             ; payload only; header is plaintext
 
- ;; Inverter serial: bytes 0–9, ASCII zero-padded (present in ANNOUNCE and DATA)
+ ;; Inverter serial: bytes 0–9, ASCII zero-padded (present in PING, ANNOUNCE, DATA,
+ ;; and TIME_SYNC/IDENTIFY payloads — read with :serial from any of them).
  :serial {:offset 0 :len 10 :encoding :ascii}
+
+ ;; Push-stream control routing (ADR-037). Per-protocol *facts* the family handler
+ ;; (ilanga.protocol.push-stream) is data-driven off; the handshake *sequence* is
+ ;; coded in the handler pending evidence it is family-shared. server→device frames
+ ;; use proto 0x0006 (the :obfuscation trigger) and unit 0x01.
+ :push-stream
+ {:server-proto  0x0006
+  :server-unit   0x01
+  :announce-type 0x03                          ; device→server frame that establishes identity
+  :data-type    #{0x04 0x50}                   ; telemetry → packet-channel (0x50 = buffered, same layout)
+  :ack          {:applies-to #{0x16 0x03 0x04 0x50}
+                 :payload    {0x16 :echo-received               ; PING: re-encode the received payload (raw echo)
+                              0x03 :zero 0x04 :zero 0x50 :zero}} ; standard 0x00 ack
+  :time-sync    {:type 0x18 :payload-format :ascii-utc      ; server→device: set RTC to UTC
+                 :trigger :after-announce}
+  :identify     {:type 0x19 :payload-format :read-registers-0x0004  ; read 21B from reg 0x0004
+                 :trigger :on-first-frame}}
 
  ;; Inverter RTC — UTC (set via TIME_SYNC; no independent time source)
  :timestamp {:offset 60

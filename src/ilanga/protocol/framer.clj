@@ -59,6 +59,66 @@
         (throw (ex-info "unsupported obfuscation algo" {:algo algo})))
       enc-payload)))
 
+(defn- write-uint-be [bs offset width value]
+  (cond
+    (= width 1) (aset bs offset (unchecked-byte (bit-and value 0xFF)))
+    (= width 2) (do (aset bs offset (unchecked-byte (bit-and (bit-shift-right value 8) 0xFF)))
+                    (aset bs (inc offset) (unchecked-byte (bit-and value 0xFF))))
+    :else (throw (ex-info "unsupported header field width" {:width width}))))
+
+(defn- length-value [framing payload-len]
+  ;; inverse of payload-len: length = payload_len + Σ(widths of non-:payload :counts).
+  (let [counts (get-in framing [:length :counts])
+        sub    (->> counts
+                    (remove #(= % :payload))
+                    (map (widths-by-name framing))
+                    (reduce +))]
+    (+ payload-len sub)))
+
+(defn- obfuscate [framing header payload]
+  ;; inverse of deobfuscate; XOR is symmetric, so encrypt == decrypt under the same :when.
+  (let [obf       (:obfuscation framing)
+        when-cond (:when obf)
+        algo      (:algo obf)
+        xor-key   (:key obf)]
+    (if (and when-cond (= (get header (key (first when-cond)))
+                          (val (first when-cond))))
+      (case algo
+        :xor-repeating (b/xor-repeating payload xor-key)
+        (throw (ex-info "unsupported obfuscation algo" {:algo algo})))
+      payload)))
+
+(defn encode
+  "Encode a packet map into wire bytes — the inverse of `frame`. `framing` is the
+   descriptor's :framing block; `packet` carries header-field values (:seq :proto
+   :unit :type …) plus :payload <decrypted byte-array>. :length is *computed*
+   from :counts + payload size, not read from the map. The payload is XOR-encrypted
+   when :obfuscation/when matches; CRC16 is computed over header + encrypted
+   payload; returns the full wire byte-array (header + encrypted payload + CRC)."
+  [framing {:keys [payload] :as packet}]
+  (let [fields    (header-fields framing)
+        hsize     (header-size framing)
+        plen      (count payload)
+        length-v  (length-value framing plen)
+        header-m  (assoc packet :length length-v)
+        header-ba (byte-array hsize)]
+    (doseq [{:keys [name width offset]} fields]
+      (write-uint-be header-ba offset width (get header-m name)))
+    (let [enc-payload (obfuscate framing header-m payload)
+          crc-input   (byte-array (+ hsize plen))
+          crc-width   (get-in framing [:crc :width])
+          crc-algo    (get-in framing [:crc :algorithm])]
+      (when-not (= crc-algo :crc16-modbus)
+        (throw (ex-info "unsupported crc algorithm" {:algorithm crc-algo})))
+      (System/arraycopy header-ba 0 crc-input 0 hsize)
+      (System/arraycopy enc-payload 0 crc-input hsize plen)
+      (let [crc (b/crc16-modbus crc-input)
+            out (byte-array (+ hsize plen crc-width))]
+        (System/arraycopy header-ba 0 out 0 hsize)
+        (System/arraycopy enc-payload 0 out hsize plen)
+        (write-uint-be out (+ hsize plen) crc-width crc)
+        out))))
+
 (defn frame
   "De-frame one complete packet. `framing` is the descriptor's :framing block;
    `bs` is the full wire packet (header + encrypted payload + CRC trailer).
